@@ -1,12 +1,12 @@
 # Agora: Design Specification
 
-**Status:** Revised after review (2026-10-31): personal build, browser-session backend
+**Status:** Revised after review (2026-10-31): public source, self-built, browser-session backend
 **Owner:** Jared (ClickCalickClick)
 **Inspiration:** [Giara](https://gitlab.gnome.org/World/giara) by Gabriele Musco
 
 Agora is a native GNOME client for Reddit, written in Rust with GTK 4 and libadwaita. It is a new project, not a fork: it takes Giara's idea (a Reddit app that feels like it belongs on GNOME) and rebuilds it for current GNOME, adaptive layouts, and touch.
 
-**This build is personal and unpublished.** Reddit is closing its public API (see `SPEC-REVIEW.md`), so Agora reads and writes Reddit through Jared's own logged-in browser session in an embedded web engine (§4) and is not distributed. The backend is pluggable so an open-network build (Lemmy/PieFed) can be published later.
+**Public source, self-built, not distributed.** Reddit is closing its public API (see `SPEC-REVIEW.md`), so Agora reads and writes Reddit through the user's own logged-in browser session in an embedded web engine (§4). The source is public on GitHub with clear disclaimers (§18); there are no binaries, store listings or Flathub releases. Each user builds and runs it themselves, on their own account, for personal use.
 
 This document is the single source of truth for what Agora does and how it is built. Anything marked **Open question** must be settled during review, before the matching roadmap phase starts.
 
@@ -20,8 +20,9 @@ This document is the single source of truth for what Agora does and how it is bu
 2. Hold to the [GNOME Circle](https://circle.gnome.org/) quality bar (HIG, accessibility, translatability) even though this build is not submitted anywhere.
 3. Cover everyday Reddit use: browsing, reading, voting, posting, replying, and the inbox.
 4. Work equally well with mouse and keyboard, touch, and a screen reader.
-5. Generate traffic indistinguishable from a person using reddit.com in a browser (§4.6).
-6. Keep every Reddit-specific detail behind a `Backend` trait so other networks can be added (§4.3).
+5. Public source on GitHub, self-built by each user, with the disclaimers in §18.
+6. Generate traffic indistinguishable from a person using reddit.com in a browser (§4.6).
+7. Keep every Reddit-specific detail behind a clean `Backend` trait (§4.3). Only the Reddit backend is in scope.
 
 ### Non-goals
 
@@ -31,7 +32,8 @@ This document is the single source of truth for what Agora does and how it is bu
 - Support for anything older than the current stable GNOME runtime (§3.1).
 - Multiple accounts in 1.0 (kept possible in the data model; see §8.3).
 - Reddit's OAuth API, API keys, or client IDs (§4.1).
-- Publishing: no Flathub release, no GNOME Circle application for this Reddit build. It is installed locally from a Flatpak bundle or a Meson build.
+- Distribution: no Flathub, no app stores, no prebuilt binaries or bundles on GitHub Releases, no GNOME Circle application. Users build from source.
+- Other networks (Lemmy, PieFed, …): not in scope.
 
 ---
 
@@ -53,7 +55,7 @@ This document is the single source of truth for what Agora does and how it is bu
 
 **Trademark note:** the app must not use the Reddit logo or Snoo in its icon, and AppStream must state that Agora is an unofficial client not affiliated with Reddit, Inc.
 
-**Name clash (flagged, low urgency now):** no Flathub app is called Agora, but the "Agora Linux App Store" (agoralinux.app, a Flatpak directory built on Flathub) and Agora.io (a real-time SDK vendor) both exist. It does not matter for a personal build. If an open-network build is ever published, decide the name before the first Flathub submission, because the app ID changes with it.
+**Name clash (flagged, low urgency now):** no Flathub app is called Agora, but the "Agora Linux App Store" (agoralinux.app, a Flatpak directory built on Flathub) and Agora.io (a real-time SDK vendor) both exist. It matters little for a self-built app that is never listed in a store; revisit only if distribution plans change.
 
 ### 2.1 Visual identity
 
@@ -178,7 +180,7 @@ agora/
 
 Reddit has closed self-service API registration (November 2025), stopped accepting new public API requests (2026-10-31), and is closing the public Data API for everyone in March 2027 (see `SPEC-REVIEW.md` §1). Agora therefore does **not** use the OAuth API or a client ID. Instead it drives Jared's own logged-in reddit.com session through a hidden web engine, so every request Reddit sees is real browser traffic from a real browser, and Agora only re-presents the results natively.
 
-This is a **personal, unpublished build** (§1). It works the way a user script or browser extension does, and it carries the same risks:
+Agora is **public source, self-built, for personal use** (§1, §18). It works the way a user script or browser extension does, and it carries the same risks:
 - **Fragility:** reddit.com's private endpoints and page markup change without notice. Expect to update the extractors (§4.5) regularly. The design isolates all Reddit-specific knowledge in one crate and a set of versioned scripts so a breakage is a small, local fix.
 - **Account risk:** automated use of the website is against Reddit's user agreement. Pacing traffic like a person (§4.6) keeps the footprint small, but the risk to the account is Jared's to accept.
 
@@ -209,7 +211,7 @@ The UI never talks to Reddit types directly. `agora-core` defines:
 - `struct Capabilities` — flags such as `downvotes`, `private_messages`, `flair`, `polls`, `nsfw`, `media_upload`, `search_scope_community`. The UI hides controls a backend lacks.
 - Neutral naming in the trait (`Community`, `community_name`); Reddit-specific wording ("subreddit", "r/") stays in UI strings.
 
-`agora-reddit-web` is the only implementation in this build. A future `agora-lemmy` crate (Lemmy/PieFed open APIs) can be added without UI changes.
+`agora-reddit-web` is the only implementation. Other backends are out of scope, but the trait stays free of Reddit types so the UI never depends on the backend crate.
 
 ### 4.4 Sign-in and session
 
@@ -310,7 +312,7 @@ Every list has an `AdwStatusPage` for empty ("No posts here yet"), signed-out ("
 
 A short welcome in an `AdwDialog` with an `AdwCarousel`:
 
-1. **Welcome:** app icon, one-sentence pitch, note that Agora shows Reddit through your own reddit.com login and is an unofficial personal client.
+1. **Welcome:** app icon, one-sentence pitch, the short disclaimer from §18 (unofficial, not affiliated with Reddit, personal use, may break, use at your own risk) with a link to the full text in About.
 2. **Sign in to Reddit:** a "Sign In" button opens Reddit's real login page in an embedded web view (§4.4). Nothing to register, no client ID.
 3. **Done:** quick tips (keyboard shortcuts, Preferences).
 
@@ -474,6 +476,7 @@ Recommendation: ship 1–3 and do not register a global https handler.
 ### 12.4 Notifications and background
 
 - Desktop notifications for new inbox replies, username mentions, and messages, sent with `GNotification` (portal-backed in Flatpak). Clicking a notification opens the item. Grouped when several arrive at once.
+- Notifications never quote content that has since been deleted (§14).
 - **Inbox checks** follow the human-pace rules in §4.6: every 15 minutes while the window is open.
 - **Background checking** is **off by default**. When enabled in Preferences, Agora requests the **Background portal** (with autostart), keeps the hidden web view alive after the window closes, and checks unread messages every 30 or 60 minutes (no faster option). It pauses after 12 hours without the app being opened and stops on any captcha, 429 or sign-out.
 - Notifications are off for signed-out users.
@@ -506,6 +509,8 @@ All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 - **Where:** `$XDG_CACHE_HOME/agora/` (SQLite DB `cache.db` + `images/` content-addressed by URL hash). Drafts and preferences are not cache; drafts live in `$XDG_DATA_HOME/agora/agora.db`.
 - **Policy:** LRU eviction when over the size limit; saved posts are evicted last. Entries carry `fetched_at`; UI shows cached content immediately and refreshes the one view on screen when online (no background refresh of other views).
 - **Offline UX:** banner, read-only actions; votes/saves made offline are **not** queued in 1.0 (they show "You're offline" toast). Decided: offline stays read-only.
+- **Deleted and removed content is dropped.** When a refresh shows a post or comment as deleted by its author or removed (`[deleted]`/`[removed]`, missing author, or a 404), Agora purges its cached copy, body, media and thumbnails, and shows the same placeholder reddit.com shows. Agora never displays or keeps a cached copy of content that is gone on Reddit, and has no "show deleted" feature. Inbox items that were deleted are removed the same way.
+- **Entries expire:** anything not viewed for 30 days is evicted regardless of size, so stale copies don't linger.
 - Sign out clears personal cache (inbox, saved, drafts).
 
 ---
@@ -536,32 +541,50 @@ All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 - All user-facing strings through gettext; plurals via `ngettext`.
 - Dates and numbers via GLib (`GDateTime` formatting, locale-aware "3 hours ago").
 - RTL layouts tested (Hebrew/Arabic pseudolocale).
-- **Platform:** GNOME's Damned Lies requires hosting on GNOME GitLab. Since the repo is on GitHub, use **Weblate** (hosted.weblate.org libre plan). For the personal build, English plus gettext plumbing is enough; Weblate is set up only if an open-network build is published.
+- **Platform:** GNOME's Damned Lies requires hosting on GNOME GitLab. Since the repo is on GitHub, use **Weblate** (hosted.weblate.org libre plan). English plus gettext plumbing is enough for now; set up Weblate only if contributors ask to translate.
 
 ---
 
-## 18. HIG and packaging checklist
+## 18. Disclaimers, legal hygiene and HIG checklist
 
-This build is personal, so Flathub and GNOME Circle are **not goals**. The quality items still apply because they make the app good to use.
+Agora is public source on GitHub but is **not distributed**: no Flathub, no app stores, no prebuilt binaries. Flathub and GNOME Circle are not goals.
+
+### Disclaimer requirements
+
+These are requirements, not suggestions. `DISCLAIMER.md` and the README text exist from the start; WP-00 wires them into the app; every later WP keeps them intact.
+
+1. **Disclaimer text.** One canonical text, `DISCLAIMER.md` at the repo root, reused verbatim (translatable) in the app:
+   > Agora is an unofficial, independent project. It is not affiliated with, endorsed by, or sponsored by Reddit, Inc. "Reddit" is a trademark of Reddit, Inc. and is used only to describe what this app works with.
+   > Agora is for personal use. It shows Reddit through your own reddit.com login, inside an embedded web browser. Automated use of reddit.com may violate Reddit's User Agreement; you are responsible for how you use it and for your account.
+   > Agora depends on reddit.com's website and may stop working at any time.
+   > The software is provided "as is", without warranty of any kind, as stated in the GPL-3.0 license. Use it at your own risk.
+2. **README:** the disclaimer appears near the top, before any build instructions.
+3. **About dialog:** the full disclaimer in a "Disclaimer" section of `AdwAboutDialog` (via `add_legal_section`), plus the GPL license. The onboarding Welcome page shows the short form (§6).
+4. **No Reddit marks.** No Reddit logo, Snoo, wordmark, colors or screenshots of Reddit's own UI in the icon, README, metainfo or repo artwork. "Reddit" appears only in plain text, descriptively ("a client for Reddit"), never as part of the app name.
+5. **No Reddit app credentials, ever.** The repo and the app contain no Reddit OAuth client IDs or secrets, no API keys, and no credentials extracted from Reddit's own web or mobile apps. The app only uses the cookies WebKit holds for the user's own login. CI runs a secrets scan (`gitleaks`) on every push.
+6. **No user data in the repo.** Fixtures are scrubbed of usernames, IDs that identify the user, tokens and cookies before they are committed (§22.1 rule 6). Fixture content written by other Reddit users is kept to the minimum needed and anonymised.
+7. **No circumvention.** Agora never bypasses captchas, rate limits, logins, paywalls, bans or blocks. When Reddit pushes back, it stops (§4.6).
+8. **License:** GPL-3.0-or-later, whose warranty disclaimer and limitation of liability (sections 15–16) apply. `LICENSE` is added in WP-00.
+
+Disclaimers lower the risk but do not guarantee that no one is held responsible. If that matters, get advice from a lawyer before inviting others to use the app.
+
+### HIG checklist
 
 | Requirement | How Agora meets it |
 |---|---|
 | Follows the GNOME HIG | libadwaita widgets throughout, adaptive layout, `AdwToolbarView` (raised top bar on scrolled pages), no custom window chrome |
 | Window state | Size and maximised state persisted in GSettings |
-| About | `AdwAboutDialog::from_appdata` so release notes come from the metainfo; credits Giara |
-| License | GPL-3.0-or-later, CC0 metadata, GNOME CoC in repo |
+| About | `AdwAboutDialog::from_appdata` with release notes, Giara credit, and the disclaimer section |
 | App icon | Original icon per §2.1, symbolic icon designed first; no Reddit marks |
-| AppStream metadata | Valid (`appstreamcli validate`), so GNOME Software shows it properly for a local install |
+| AppStream metadata | Valid (`appstreamcli validate`) and states the disclaimer in its description |
 | Translatable | gettext throughout |
 | Accessible | §16 |
 | Adaptive / mobile | §5, tested at 360×640; desktop file has `X-Purism-FormFactor=Workstation;Mobile;` |
 | Privacy | No telemetry; network traffic only through the hidden web view to reddit.com and to Reddit's media CDNs |
 
-**Circle and Flathub status, for a future open-network build:** Circle stopped taking new submissions on 2026-05-29 and adopted an AI-authorship policy; Flathub tightened its AI policy at the same time. Re-check both before publishing anything.
-
 ### 18.1 Flatpak manifest
 
-`build-aux/io.github.ClickCalickClick.Agora.Devel.json`, built locally with `flatpak-builder` (installed as a bundle, not submitted anywhere):
+`build-aux/io.github.ClickCalickClick.Agora.Devel.json`, built by each user with `flatpak-builder --user --install` (no bundles are published):
 - Runtime/SDK `org.gnome.Platform` / `org.gnome.Sdk` at the target version (§3.1), plus `org.freedesktop.Sdk.Extension.rust-stable`.
 - **WebKitGTK 6.0** (`webkitgtk-6.0`) comes from the GNOME runtime; no extra module. WP-00 adds a CI check that `pkg-config --modversion webkitgtk-6.0` succeeds in the SDK, and adds `libspelling` as a module only if the SDK lacks it.
 - Finish args: `--share=network`, `--share=ipc`, `--socket=wayland`, `--socket=fallback-x11`, `--device=dri`, `--socket=pulseaudio` (video audio). No filesystem access (portals for files). Background, OpenURI, FileChooser and Notification go through portals. No `org.freedesktop.secrets` talk-name (no secrets are stored outside WebKit's own profile).
@@ -592,8 +615,7 @@ Each phase ends with a usable build and the accessibility + keyboard walkthrough
 | 3 | Media | Image viewer, galleries, inline video, GIF looping rules, NSFW/spoiler blur, large card previews, image cache | All common post types display correctly |
 | 4 | Interaction | Voting, saving, hiding, reporting, subscribe/unsubscribe, composer (all modes) with toolbar, preview, drafts, edit/delete, user profiles | Can post, reply, and edit end to end |
 | 5 | Inbox & desktop integration | Inbox, messages, notifications, opt-in Background portal checking, Shell search provider, URL routing + open-from-clipboard, share menu, search with scope toggle | All integrations working inside Flatpak |
-| 6 | Polish & release | Preferences complete, filters, offline cache with limits + Clear Cache, content zoom, full shortcuts dialog, icon, screenshots, AppStream, Orca audit | 1.0 installed locally as a Flatpak bundle |
-| Later | Open-network build | `agora-lemmy` backend (Lemmy/PieFed), which could be published | Separate decision |
+| 6 | Polish & release | Preferences complete, filters, offline cache with limits + Clear Cache, content zoom, full shortcuts dialog, icon, screenshots, AppStream, Orca audit | 1.0 tagged; builds from a fresh clone |
 | Later | | Multi-account, offline action queue, polls, share portal if available | |
 
 ---
@@ -601,18 +623,19 @@ Each phase ends with a usable build and the accessibility + keyboard walkthrough
 ## 21. Decisions and remaining questions
 
 Settled after the 2026-10-31 review (`SPEC-REVIEW.md`):
-1. **Data access:** no Reddit API; personal build using a logged-in WebKit session with a JS bridge (§4). Backend is pluggable for a later Lemmy/PieFed build.
+1. **Data access:** no Reddit API; a logged-in WebKit session with a JS bridge (§4), behind a clean `Backend` trait. Reddit only.
 2. **HTTP:** `reqwest` + `tokio` on one thread, for media and tests only (§3.2).
 3. **External reddit.com links:** no global `https` handler. `GApplication` open-URI (desktop file `%U`), Ctrl+L open-from-clipboard, drag-and-drop (§12.2).
 4. **Sharing:** Copy Link / Open in Browser / Send by Email menu; no Share portal exists in GNOME 51 (§12.3).
-5. **Hosting:** GitHub; no Weblate until something is published (§17).
+5. **Hosting:** public source on GitHub; no Weblate for now (§17).
 6. **Offline:** read-only (§14).
 7. **App ID:** `io.github.ClickCalickClick.Agora` (§2).
-8. **Distribution:** local Flatpak bundle only; Flathub and Circle dropped for this build (§1, §18).
+8. **Distribution:** none. Public source, self-built; Flathub, stores, binaries and Circle are out (§1, §18).
+9. **Disclaimers:** README, About dialog and onboarding, from one `DISCLAIMER.md` (§18).
 
 Still open:
 - **Extraction strategies:** which of §4.5's three strategies works for each operation against the live site. Answered by WP-02 in `STRATEGIES.md` before wave 2.
-- **Name clash:** only matters if an open-network build is ever published (§2).
+- **Name clash:** low priority while nothing is listed in a store (§2).
 
 ---
 
@@ -652,7 +675,7 @@ Also frozen as contracts (not in `agora-core`, but changed only with the lead's 
 
 | WP | Wave | Name | Owns (paths) | Spec | Deps | Acceptance (summary) |
 |---|---|---|---|---|---|---|
-| 00 | 0 | Scaffold & CI | root `Cargo.toml`, `meson.build`, `build-aux/`, `data/` (desktop, metainfo, complete gschema), `po/`, `.github/` | §2, §3, §13, §18, §19 | — | Flatpak builds and launches an empty `AdwApplicationWindow`; complete gschema frozen; gresource/POTFILES/CSS generated from globs; CI runs fmt, clippy, test, appstream/desktop validation |
+| 00 | 0 | Scaffold & CI | root `Cargo.toml`, `meson.build`, `build-aux/`, `data/` (desktop, metainfo, complete gschema), `po/`, `.github/`, `LICENSE`, `DISCLAIMER.md` | §2, §3, §13, §18, §19 | — | Flatpak builds and launches an empty `AdwApplicationWindow`; disclaimer in About; complete gschema frozen; gresource/POTFILES/CSS generated from globs; CI runs fmt, clippy, test, gitleaks, appstream/desktop validation |
 | 01 | 0 | Core contracts | `crates/agora-core/` | §3.4, §22.2 | 00 | All types/traits in §22.2 compile with docs; serde round-trip tests; `MockBackend` with sample data and capability toggles |
 | 02 | 1 | Reddit extractors | `crates/agora-reddit-web/js/ops/`, `src/parse/`, `src/backend.rs`, `STRATEGIES.md`, `tests/` | §4.3, §4.5, §4.7 | 01, 03 (bridge API only) | `RedditWebBackend` implements `Backend`; one `ops/*.js` + parser per operation with strategy fallback; writes confirmed by read-back; every parser tested on fixtures; `STRATEGIES.md` filled in from the lead's live run; `--self-test` |
 | 03 | 1 | Web session & bridge | `crates/agora-reddit-web/src/session/`, `src/bridge/`, `src/pacing/`, `js/agora-bridge.js` | §4.2, §4.4, §4.6 | 01 | Persistent `NetworkSession`; hidden view lifecycle; isolated script world; `postMessage` request/response with ids and timeouts; login detection, sign-out, session-expired signal; pacing scheduler with jitter, burst and backoff rules (time-mocked tests); bridge tested under `xvfb-run` against a local page |
@@ -674,7 +697,7 @@ Also frozen as contracts (not in `agora-core`, but changed only with the lead's 
 | 19 | 3 | Preferences & filters | `ui/preferences*`, filter logic in `stores/filters*` | §13, §15 | 04, 07 | All preference pages bound to GSettings; muted subs/keywords with "N hidden" row; Clear Cache |
 | 20 | 4 | Identity & assets | `data/icons/`, status page illustrations, AppStream screenshots | §2.1, §18 | — (design can start any time) | App + symbolic icon per guidelines, empty-state art, branding colors, screenshots light/dark |
 | 21 | 4 | Accessibility & i18n audit | edit rights across `agora-app` for a11y/i18n fixes only (lead reviews); `po/` | §16, §17 | 08–19 | Orca and keyboard-only pass on every screen; RTL check |
-| 22 | 4 | Local release | Flatpak bundle build script, release notes | §18.1, §20 | all | `flatpak-builder` produces an installable bundle; app runs signed-in for a day of normal use with no captcha or block |
+| 22 | 4 | Source release | Build instructions, tagged release notes (no binaries) | §18.1, §20 | all | a fresh clone builds and installs with the documented `flatpak-builder` command; disclaimer present in README, About and onboarding; app runs signed-in for a day of normal use with no captcha or block |
 
 ### 22.4 Waves and parallelism
 
