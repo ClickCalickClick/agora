@@ -1,0 +1,4 @@
+{
+  "vote_clear": {"status": 200, "body": {"data": {"updatePostVoteState": {"errors": null, "ok": true, "voteState": "NONE"}}, "errors": [], "operation": "UpdatePostVoteState", "extensions": {"traceID": "REDACTED"}}},
+  "unsubscribe": {"status": 200, "body": {"data": {"updateSubredditSubscriptions": {"ok": true, "errors": null}}, "errors": [], "operation": "UpdateSubredditSubscriptions", "extensions": {"traceID": "REDACTED"}}}
+}

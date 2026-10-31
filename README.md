@@ -18,11 +18,11 @@ Agora is not published on Flathub, in any app store, or as prebuilt binaries. If
 
 ## How it talks to Reddit
 
-Reddit is closing its public API, so Agora does not use it, and this repository contains no Reddit API keys or app credentials. Instead you sign in to reddit.com once, inside an embedded web view. Agora keeps that browser session in a hidden WebKitGTK view, asks it for the pages and data you open, and shows the results in a native GNOME interface. Traffic is kept to the pace of a person using a browser: no prefetching, no bulk syncing, and background checks are off by default.
+Reddit is closing its public API, so Agora does not use it, and this repository contains no Reddit API keys or app credentials. Instead you sign in to reddit.com once, inside an embedded web view. Agora keeps that browser session in a hidden WebKitGTK view, asks it for the pages and data you open, and shows the results in a native GNOME interface. Traffic is kept to the pace of a person using a browser: no prefetching, no bulk syncing, and no checking for messages after you close the window.
 
 ## Status
 
-Planning. The design lives in [docs/SPEC.md](docs/SPEC.md), with the review that shaped it in [docs/SPEC-REVIEW.md](docs/SPEC-REVIEW.md). No app code yet.
+Planning. The design lives in [docs/SPEC.md](docs/SPEC.md), with the reviews that shaped it in [docs/reviews/](docs/reviews/). No app code yet.
 
 ## Planned features
 
@@ -30,10 +30,9 @@ Planning. The design lives in [docs/SPEC.md](docs/SPEC.md), with the review that
 - Reading, voting, posting, replying, and inbox
 - Markdown composer with formatting toolbar, live preview, and auto-saved drafts
 - Image viewer, galleries, and inline video
-- Desktop notifications for replies and mentions
+- Desktop notifications for replies and mentions while Agora is open
 - GNOME Shell search provider for your subreddits
 - Full keyboard shortcuts and screen reader support
-- Offline cache of what you've viewed (content deleted on Reddit is dropped from it)
 - NSFW blurring and muted subreddits/keywords
 
 ## Building (planned)
