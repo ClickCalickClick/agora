@@ -1,10 +1,12 @@
 # Agora: Design Specification
 
-**Status:** Draft for review (2026-10-31)
+**Status:** Revised after review (2026-10-31): personal build, browser-session backend
 **Owner:** Jared (ClickCalickClick)
 **Inspiration:** [Giara](https://gitlab.gnome.org/World/giara) by Gabriele Musco
 
-Agora is a native GNOME client for Reddit, written in Rust with GTK 4 and libadwaita. It is a new project, not a fork: it takes Giara's idea (a Reddit app that feels like it belongs on GNOME) and rebuilds it for current GNOME, adaptive layouts, touch, and GNOME Circle.
+Agora is a native GNOME client for Reddit, written in Rust with GTK 4 and libadwaita. It is a new project, not a fork: it takes Giara's idea (a Reddit app that feels like it belongs on GNOME) and rebuilds it for current GNOME, adaptive layouts, and touch.
+
+**This build is personal and unpublished.** Reddit is closing its public API (see `SPEC-REVIEW.md`), so Agora reads and writes Reddit through Jared's own logged-in browser session in an embedded web engine (§4) and is not distributed. The backend is pluggable so an open-network build (Lemmy/PieFed) can be published later.
 
 This document is the single source of truth for what Agora does and how it is built. Anything marked **Open question** must be settled during review, before the matching roadmap phase starts.
 
@@ -15,10 +17,11 @@ This document is the single source of truth for what Agora does and how it is bu
 ### Goals
 
 1. Feel like a first-party GNOME app: HIG-compliant, adaptive, accessible, translatable.
-2. Meet the [GNOME Circle](https://circle.gnome.org/) quality bar (HIG, accessibility, CoC, Flathub). Applying to Circle itself is **aspirational**: see the status note in §18.
+2. Hold to the [GNOME Circle](https://circle.gnome.org/) quality bar (HIG, accessibility, translatability) even though this build is not submitted anywhere.
 3. Cover everyday Reddit use: browsing, reading, voting, posting, replying, and the inbox.
 4. Work equally well with mouse and keyboard, touch, and a screen reader.
-5. Distribute on Flathub.
+5. Generate traffic indistinguishable from a person using reddit.com in a browser (§4.6).
+6. Keep every Reddit-specific detail behind a `Backend` trait so other networks can be added (§4.3).
 
 ### Non-goals
 
@@ -27,7 +30,8 @@ This document is the single source of truth for what Agora does and how it is bu
 - Swipe-to-vote or swipe-to-save gestures. Swipes are for navigation only.
 - Support for anything older than the current stable GNOME runtime (§3.1).
 - Multiple accounts in 1.0 (kept possible in the data model; see §8.3).
-- A bundled Reddit API key. Users register their own client ID.
+- Reddit's OAuth API, API keys, or client IDs (§4.1).
+- Publishing: no Flathub release, no GNOME Circle application for this Reddit build. It is installed locally from a Flatpak bundle or a Meson build.
 
 ---
 
@@ -36,20 +40,20 @@ This document is the single source of truth for what Agora does and how it is bu
 | Item | Value |
 |---|---|
 | Name | Agora |
-| App ID | `io.github.ClickCalickClick.Agora` (reverse-DNS of a domain we control; change if a custom domain is bought before 1.0) |
+| App ID | `io.github.ClickCalickClick.Agora` (matches the GitHub repo) |
 | GenericName | Reddit Client |
 | Summary (AppStream) | "Browse and discuss Reddit" |
 | Desktop `Keywords` | `Reddit;Subreddit;Forum;Social;News;Discussion;` (translatable) |
 | Categories | `Network;News;GTK;GNOME;` |
-| License | GPL-3.0-or-later (same family as Giara; Circle requires an OSI license) |
+| License | GPL-3.0-or-later (same family as Giara) |
 | Metadata license | CC0-1.0 |
 | Code of Conduct | GNOME Code of Conduct (`CODE_OF_CONDUCT.md` links to it) |
 
-**Discoverability:** searching "Reddit" in GNOME Software, Flathub, and the Activities overview must find Agora. This is done through `GenericName`, `Keywords`, and the AppStream `<keywords>` and `<summary>`. The name "Agora" itself must not contain "Reddit" (trademark).
+**Discoverability:** searching "Reddit" in the Activities overview (and GNOME Software, for a local install) must find Agora. This is done through `GenericName`, `Keywords`, and the AppStream `<keywords>` and `<summary>`. The name "Agora" itself must not contain "Reddit" (trademark).
 
 **Trademark note:** the app must not use the Reddit logo or Snoo in its icon, and AppStream must state that Agora is an unofficial client not affiliated with Reddit, Inc.
 
-**Name clash (decide before WP-00 bakes in the app ID):** no Flathub app is called Agora, but the "Agora Linux App Store" (agoralinux.app, a Flatpak directory built on Flathub) and Agora.io (a well-known real-time SDK vendor) both exist. A community app named Agora next to a Flatpak store named Agora may confuse Flathub searches. If the name changes, the app ID changes with it, before the first Flathub submission. The `io.github.ClickCalickClick.Agora` ID is otherwise correct: Flathub verifies `io.github.*` IDs against the matching GitHub repo.
+**Name clash (flagged, low urgency now):** no Flathub app is called Agora, but the "Agora Linux App Store" (agoralinux.app, a Flatpak directory built on Flathub) and Agora.io (a real-time SDK vendor) both exist. It does not matter for a personal build. If an open-network build is ever published, decide the name before the first Flathub submission, because the app ID changes with it.
 
 ### 2.1 Visual identity
 
@@ -96,31 +100,31 @@ Agora must be recognisably its own app while looking unmistakably GNOME. The rul
 | UI | `gtk4`, `libadwaita` (gtk-rs) | Feature flags pinned to the target runtime's GTK / libadwaita (§3.1) |
 | UI definitions | Blueprint (`.blp`) compiled to `.ui` | Composite templates via `#[derive(CompositeTemplate)]` |
 | GObject / async | `glib`, `gio` | UI work runs on the GLib main context |
-| HTTP | `reqwest` (rustls) on a `tokio` runtime | **Decided.** One `tokio` runtime on a dedicated thread. A single bridge helper `spawn_tokio(fut)` in `agora-app/src/rt.rs` (owned by WP-06) sends results back over a `oneshot` channel awaited with `glib::spawn_future_local`. No tokio types anywhere else in `agora-app`. Keeps library crates testable with `#[tokio::test]` and no display. |
-| JSON | `serde`, `serde_json` | Typed models for Reddit "Thing" objects |
-| Portals | `ashpd` | Background, OpenURI, Secret, Settings |
+| Reddit traffic | `webkit6` (WebKitGTK 6.0) | Hidden logged-in WebView, JS bridge via script message handlers; see §4.2 |
+| HTTP (media, tests) | `reqwest` (rustls) on a `tokio` runtime | **Decided.** Used for media CDN downloads (§4.6) and test servers, never for reddit.com pages. One `tokio` runtime on a dedicated thread. A single bridge helper `spawn_tokio(fut)` in `agora-app/src/rt.rs` (owned by WP-06) sends results back over a `oneshot` channel awaited with `glib::spawn_future_local`. No tokio types anywhere else in `agora-app`. Keeps library crates testable with `#[tokio::test]` and no display. |
+| JSON | `serde`, `serde_json` | Bridge messages and Reddit JSON parsed into `agora-core` models |
+| Portals | `ashpd` | Background, OpenURI, Settings |
 | D-Bus | `zbus` | GNOME Shell search provider |
-| Secrets | `oo7` | Uses the Secret portal inside Flatpak, keyring outside |
 | Cache DB | `rusqlite` (bundled SQLite) | Metadata and post bodies |
 | Image decoding | `glycin` | Same sandboxed loader stack as Loupe; supports animated formats |
-| Markdown | `pulldown-cmark` plus a Reddit extension layer | Reddit adds spoilers (`>!text!<`), superscript (`^`), `/r/` and `/u/` autolinks |
+| Markdown / HTML | `pulldown-cmark` plus a Reddit extension layer; `html5ever`/`scraper` for HTML bodies | Spoilers (`>!text!<`, pre-pass), superscript (`^`), `r/` and `u/` autolinks (post-pass). HTML from page extraction maps to the same AST (§4.5) |
 | Video | `GtkVideo` / `GtkMediaFile` (GStreamer backend) | Reddit hosted video is DASH/HLS; see §7.4 |
 | i18n | `gettext-rs` | |
-| Logging | `tracing` | Never logs tokens or post content at info level |
+| Logging | `tracing` | Never logs cookies, CSRF tokens or post content at info level |
 | Build | Meson + Cargo | Standard GNOME Rust template layout |
 
 ### 3.3 Repository layout (planned)
 
-The code is a **Cargo workspace of small crates** so independent work packages (§22) can be built and tested in isolation by separate agents. Only `agora-app` depends on GTK; the library crates are plain Rust and testable without a display.
+The code is a **Cargo workspace of small crates** so independent work packages (§22) can be built and tested in isolation by separate agents. Only `agora-app` and `agora-reddit-web` depend on GTK/WebKit; `agora-reddit-web` keeps its parsers in a display-free module so they are testable with plain `cargo test`.
 
 ```
 agora/
 ├── Cargo.toml                 # workspace
 ├── crates/
 │   ├── agora-core/            # shared types: IDs, Thing models, errors, traits (contracts)
-│   ├── agora-api/             # Reddit HTTP client, OAuth, rate limiting
+│   ├── agora-reddit-web/      # Backend impl: hidden WebView session, JS bridge, ops/*.js, parsers, pacing
 │   ├── agora-cache/           # SQLite store, image cache, eviction, drafts
-│   ├── agora-markdown/        # Reddit Markdown → document AST (no GTK)
+│   ├── agora-markdown/        # Reddit Markdown and HTML → document AST (no GTK)
 │   └── agora-app/             # GTK/libadwaita app (everything below)
 ├── meson.build
 ├── build-aux/io.github.ClickCalickClick.Agora.Devel.json   # Flatpak manifest
@@ -140,7 +144,6 @@ agora/
     ├── SPEC.md
     └── work-packages/  # one brief per work package (§22), generated from this spec
 ```
-```
 
 ### 3.4 Architecture overview
 
@@ -155,57 +158,97 @@ agora/
  └───────────────▲──────────────────────────┬────────────┘
                  │                          │
  ┌───────────────┴────────┐   ┌─────────────▼────────────┐
- │  Cache (SQLite + files)│◄──┤  API client (async)      │
- └────────────────────────┘   │  OAuth · rate limit · JSON│
+ │  Cache (SQLite + files)│◄──┤  Backend trait           │
+ └────────────────────────┘   │  RedditWebBackend: pacing│
+                              │  · JS bridge · parsers   │
                               └─────────────┬────────────┘
                                             ▼
-                                    oauth.reddit.com
+                         hidden WebKit view on www.reddit.com
 ```
 
 - **Stores** are GObjects that own state and expose `gio::ListModel`s, so views bind to them directly (`GtkListView` + `GtkSignalListItemFactory`). Views never call the API.
-- **API client** is a plain async Rust type (no GTK), unit-testable with recorded fixtures.
-- **Cache** sits between stores and the API: reads return cached data first, then refresh.
+- **Backend** is reached only through the `Backend` trait (§4.3); parsers are unit-tested with recorded fixtures.
+- **Cache** sits between stores and the backend: reads return cached data first, then refresh.
 
 ---
 
-## 4. Reddit API and authentication
+## 4. Data access: the browser-session backend
 
-### 4.1 Bring-your-own client ID
+### 4.1 Why a browser session
 
-Agora ships with no API credentials. Each user registers a Reddit app of type **installed app** at `https://www.reddit.com/prefs/apps` and pastes the client ID into Agora. Installed apps have no client secret, so nothing secret is stored besides the user's tokens.
+Reddit has closed self-service API registration (November 2025), stopped accepting new public API requests (2026-10-31), and is closing the public Data API for everyone in March 2027 (see `SPEC-REVIEW.md` §1). Agora therefore does **not** use the OAuth API or a client ID. Instead it drives Jared's own logged-in reddit.com session through a hidden web engine, so every request Reddit sees is real browser traffic from a real browser, and Agora only re-presents the results natively.
 
-- Redirect URI to register: `http://127.0.0.1:65010/agora-auth` (fixed, shown in onboarding with a Copy button).
-- User-Agent: `linux:io.github.ClickCalickClick.Agora:<version> (by /u/<username>)`, as Reddit's API rules require.
+This is a **personal, unpublished build** (§1). It works the way a user script or browser extension does, and it carries the same risks:
+- **Fragility:** reddit.com's private endpoints and page markup change without notice. Expect to update the extractors (§4.5) regularly. The design isolates all Reddit-specific knowledge in one crate and a set of versioned scripts so a breakage is a small, local fix.
+- **Account risk:** automated use of the website is against Reddit's user agreement. Pacing traffic like a person (§4.6) keeps the footprint small, but the risk to the account is Jared's to accept.
 
-**Risk (must verify before Phase 1):** Reddit has tightened API access since 2023 (paid tiers for high volume, and stricter review of new apps). Confirm that self-service registration of an installed app still works, what the current free rate limit is, and whether personal-use apps need approval. If registration is gated, onboarding must explain the process and the app must handle "app not approved" errors clearly.
+### 4.2 Architecture
 
-### 4.2 OAuth flow
+```
+ Agora UI (GTK)                                   hidden WebKitGTK WebView
+ ───────────────                                  ─────────────────────────
+ Stores ──► Backend trait ──► RedditWebBackend ──► run_javascript("agora.fetchFeed(...)")
+                                   ▲                          │  same-origin fetch / DOM read
+                                   │                          ▼
+                                   └── parse JSON ◄── script message handler "agora"
+                                       into agora-core models   (postMessage({id, ok, data}))
+```
 
-1. User taps **Sign In**. Agora generates a random `state`, starts a one-shot HTTP listener on `127.0.0.1:65010`, and opens the authorize URL in the browser through the OpenURI portal:
-   `https://www.reddit.com/api/v1/authorize?client_id=…&response_type=code&state=…&redirect_uri=…&duration=permanent&scope=…`
-2. The browser redirects to the loopback listener. Agora validates `state`, shows a small "You can close this tab" page, and stops the listener.
-3. Agora exchanges the code at `/api/v1/access_token` (HTTP Basic with client ID and empty secret).
-4. Refresh token goes to the keyring via `oo7`. The access token stays in memory only and is refreshed on 401 or before expiry.
-5. Sign out revokes the token (`/api/v1/revoke_token`) and clears the keyring entry and personal cache.
+- **Engine:** WebKitGTK 6.0 via the `webkit6` crate (GTK 4 API), which the GNOME runtime already ships.
+- **Session:** one `webkit6::NetworkSession` with a persistent data directory (`$XDG_DATA_HOME/agora/web/`). Cookies, local storage, and the login live there, exactly as in a normal browser profile. Agora never reads or stores the password; it never copies cookies out of WebKit.
+- **Hidden view:** a `WebView` that is created but never shown, kept on `https://www.reddit.com/` so all calls are same-origin. It is a normal desktop WebKit, so its User-Agent, TLS fingerprint, cookies and headers are a real browser's. Agora does not override the User-Agent.
+- **Bridge:** Agora injects one user script (`agora-bridge.js`, bundled in the gresource) via `UserContentManager`. It exposes `window.agora.<operation>(requestId, args)` functions. Each finishes by calling `window.webkit.messageHandlers.agora.postMessage({id, ok, data | error})`. Rust registers the `agora` handler, matches replies to pending requests by `id`, and resolves the corresponding future. `run_javascript` is used only to kick off an operation, never to return large data.
+- **Isolation:** the bridge runs in an isolated `ScriptWorld` so page scripts cannot call or observe it.
+- **Threading:** WebKit lives on the GTK main thread. The backend is a GObject-free Rust type that holds a handle to the view and exposes `async fn`s; no tokio needed for Reddit traffic (§3.2 tokio remains for media downloads and tests).
 
-Scopes: `identity read mysubreddits subscribe vote save submit edit history privatemessages report`. No `modposts`, `modconfig`, or other mod scopes.
+### 4.3 Pluggable backend
 
-**Fallback:** if port 65010 is busy, show an error that names the port. (Reddit requires the redirect URI to match exactly, so a random port is not possible.)
+The UI never talks to Reddit types directly. `agora-core` defines:
 
-### 4.3 Anonymous browsing
+- `trait Backend` — async methods for listings, post + comments, more comments, vote, save, hide, report, submit, comment, edit, delete, inbox, mark read, compose message, search, subscribe, subreddit info, user profile.
+- `struct Capabilities` — flags such as `downvotes`, `private_messages`, `flair`, `polls`, `nsfw`, `media_upload`, `search_scope_community`. The UI hides controls a backend lacks.
+- Neutral naming in the trait (`Community`, `community_name`); Reddit-specific wording ("subreddit", "r/") stays in UI strings.
 
-Before sign-in (or if the user skips it), Agora can browse with an application-only token (`grant_type=https://oauth.reddit.com/grants/installed_client`). This still requires a client ID. Voting, posting, inbox, and subscriptions are disabled with an inline "Sign in to vote" prompt instead of hidden buttons.
+`agora-reddit-web` is the only implementation in this build. A future `agora-lemmy` crate (Lemmy/PieFed open APIs) can be added without UI changes.
 
-### 4.4 Rate limiting and networking
+### 4.4 Sign-in and session
 
-- Read `X-Ratelimit-Remaining` / `X-Ratelimit-Reset` on every response; a token bucket delays requests before the limit is hit.
-- Background inbox checks use the same budget and back off first.
-- Network state comes from `gio::NetworkMonitor`. Offline mode shows an `AdwBanner` ("You're offline — showing saved content") rather than error dialogs.
-- Errors surface as `AdwToast`s with a Retry action; never as modal dialogs.
+- **Sign in** opens a visible `WebView` in an `AdwDialog` on `https://www.reddit.com/login` using the same `NetworkSession`. Jared logs in with Reddit's own page (password, 2FA, SSO, captchas all handled by Reddit). Agora detects success when the bridge's `agora.whoami()` returns a username, then closes the dialog.
+- **Session expiry:** if any operation returns "logged out", the backend emits `session-expired`; the UI shows an `AdwBanner` ("Signed out of Reddit · Sign In") and stops issuing requests.
+- **Sign out** clears the `NetworkSession` website data and the personal cache.
+- No logged-out browsing: Reddit is moving to logged-in-only, and signing in is the first-run step (§6).
 
-### 4.5 Endpoints used (summary)
+### 4.5 Extraction strategy
 
-Listings (`/best`, `/hot`, `/new`, `/top`, `/rising`, `/r/{sub}/…`), comments (`/comments/{id}`, `/api/morechildren`), user (`/api/v1/me`, `/user/{name}/…`), subscriptions (`/subreddits/mine/subscriber`, `/api/subscribe`), actions (`/api/vote`, `/api/save`, `/api/unsave`, `/api/hide`, `/api/report`), posting (`/api/submit`, `/api/comment`, `/api/editusertext`, `/api/del`), media upload (`/api/media/asset.json`), inbox (`/message/inbox`, `/message/unread`, `/api/read_message`, `/api/compose`), search (`/search`, `/r/{sub}/search`, `/subreddits/search`), subreddit info (`/r/{sub}/about`, `/r/{sub}/about/rules`, `/api/v1/{sub}/post_requirements`).
+Every operation is a small, versioned JavaScript function in `crates/agora-reddit-web/js/ops/<operation>.js`, paired with a Rust parser in `src/parse/<operation>.rs`. Each operation tries strategies in order and reports which one it used:
+
+1. **Same-origin JSON** — `fetch()` with `credentials: "include"` against the JSON endpoints the logged-in site still serves (for example `/r/{sub}/hot.json`, `/comments/{id}.json`, `/api/me.json`). Preferred: gives Markdown bodies and full metadata.
+2. **Site-internal endpoints** — the endpoints reddit.com's own front-end calls (for example HTML partials under `/svc/shreddit/…`), parsed from the returned markup inside the page with `DOMParser`.
+3. **Page DOM** — navigate the hidden view to the normal page and read Reddit's web components (`shreddit-post`, `shreddit-comment` attributes and slots).
+
+Writes (vote, save, comment, submit, message) reuse the site's own requests with the page's CSRF token, or, as a last resort, operate the page's own controls in the hidden view. Every write is followed by a read-back to confirm it took effect; a mismatch becomes an error toast, never a silent success.
+
+Which strategy works for which operation must be established in WP-02's first week against Jared's live session and recorded in `crates/agora-reddit-web/STRATEGIES.md`.
+
+**Self-test:** a hidden "Check Reddit connection" action in Preferences (and `agora --self-test`) runs every read operation once and reports which ones broke, so a Reddit change is diagnosed in seconds.
+
+**Body format:** strategy 1 yields Markdown; strategies 2–3 yield HTML. The renderer accepts both: `agora-markdown` gets an `html_to_ast` path (sanitised subset: p, a, em, strong, del, code, pre, blockquote, ul/ol/li, table, sup, spoiler spans, img) alongside the Markdown parser.
+
+### 4.6 Human-paced traffic
+
+The goal is that Agora's traffic is indistinguishable in volume and rhythm from Jared browsing reddit.com in a tab.
+
+- **One request at a time** through the hidden view, with a minimum gap of ~1 s between requests plus small random jitter, and short bursts allowed only right after a user action (open a post → post + comments).
+- **No prefetch:** load the next page of a feed only when the user scrolls near the end; never load comments for posts the user hasn't opened; never pre-open links.
+- **No bulk caching:** the cache (§14) stores only what the user actually viewed.
+- **Inbox checks:** every 15 minutes while the window is open; background checking is **off by default** and, when enabled, polls no more than every 30 minutes and pauses overnight-length idle (no checks after 12 h without the user opening the app).
+- **Respect pushback:** on HTTP 429, a captcha/interstitial page, or any unexpected redirect to login, stop all traffic, show a banner, and back off exponentially (starting at 5 minutes). Never retry automatically in a tight loop.
+- **Media:** images and video load from Reddit's public media CDNs (`i.redd.it`, `preview.redd.it`, `v.redd.it`, `external-preview.redd.it`) only when on screen, as a browser would. They are fetched with the same User-Agent string the WebView reports and no cookies. Avatars and thumbnails are lazy-loaded the same way.
+
+### 4.7 Networking and errors
+
+- Network state comes from `gio::NetworkMonitor`. Offline mode shows an `AdwBanner` ("You're offline — showing saved content").
+- Errors surface as `AdwToast`s with a Retry action, never modal dialogs. `AgoraError` gains `SessionExpired`, `Blocked` (captcha/429), and `ExtractorBroken { operation, strategy }`.
 
 ---
 
@@ -265,14 +308,13 @@ Every list has an `AdwStatusPage` for empty ("No posts here yet"), signed-out ("
 
 ## 6. Onboarding (first launch)
 
-A skippable welcome tour shown in an `AdwDialog` with an `AdwCarousel` and dot indicators:
+A short welcome in an `AdwDialog` with an `AdwCarousel`:
 
-1. **Welcome:** app icon, one-sentence pitch, "Unofficial Reddit client" note.
-2. **Set up API access:** explains why a client ID is needed, a button that opens `reddit.com/prefs/apps`, step-by-step text (choose "installed app", paste this redirect URI with a Copy button), and an entry for the client ID with live validation (format check, then a test token request).
-3. **Sign in:** Sign In button (OAuth flow), or "Browse without signing in".
-4. **Done:** quick tips (keyboard shortcuts, Preferences).
+1. **Welcome:** app icon, one-sentence pitch, note that Agora shows Reddit through your own reddit.com login and is an unofficial personal client.
+2. **Sign in to Reddit:** a "Sign In" button opens Reddit's real login page in an embedded web view (§4.4). Nothing to register, no client ID.
+3. **Done:** quick tips (keyboard shortcuts, Preferences).
 
-"Skip" is always available. If skipped without a client ID, the main window shows an `AdwStatusPage` with a "Set Up Reddit Access" button that reopens step 2. The client ID can be changed later in Preferences.
+If the dialog is closed before signing in, the main window shows an `AdwStatusPage` "Sign in to Reddit" with a Sign In button. Sign In / Sign Out also live in the account popover and Preferences.
 
 ---
 
@@ -283,7 +325,7 @@ A skippable welcome tour shown in an `AdwDialog` with an `AdwCarousel` and dot i
 Text-first rows, built as a custom `GtkListBoxRow`-style widget in a `GtkListView`:
 
 - Title (wraps to 3 lines, `.heading` weight), then a subtitle line: `r/sub · u/author · 3h · flair`.
-- Small rounded thumbnail (64×64, `border-radius: 8px`) on the trailing edge when the post has media.
+- Small rounded thumbnail (64×64 logical, requested at 2× for HiDPI, `border-radius: 8px`) on the trailing edge when the post has media.
 - Trailing column: score and comment count. Vote state shown by color of the score (accent for up, a muted secondary color for down).
 - Badges as small pills: NSFW, Spoiler, Pinned, OC, Locked.
 - Read posts dim their title (`.dim-label`).
@@ -313,7 +355,7 @@ Interactions:
 ### 7.4 Video
 
 - Inline `GtkVideo` in post view. Tap to play; **no autoplay**. Controls: play/pause, seek, volume, fullscreen.
-- Reddit-hosted video (`v.redd.it`) is delivered as DASH/HLS with separate audio. Use the HLS playlist through GStreamer's `hlsdemux`; verify in Phase 3 that the GNOME runtime's GStreamer plugins handle it. **Fallback:** play the highest `fallback_url` MP4 (video only) with a "No audio" note, plus Open in Browser.
+- Reddit-hosted video (`v.redd.it`) is delivered as DASH/HLS with separate audio. Use the HLS playlist through GStreamer's `hlsdemux`; the GNOME 51 runtime ships `hlsdemux2` (gst-plugins-good) and DASH support (gst-plugins-bad). Set `souphttpsrc`'s `user-agent` to the WebView's string (§4.6); without a browser User-Agent the CDN returns 403. **Fallback:** play the highest `fallback_url` MP4 (video only) with a "No audio" note, plus Open in Browser.
 - External video (YouTube etc.) shows a link card that opens in the browser.
 - **Short silent GIFs/GIFVs** (no audio track, under ~30 s) loop automatically in the post view, **unless** the system "reduce animation" setting is on (`gtk-enable-animations` false), in which case they show a play button. They never autoplay in the list.
 
@@ -432,7 +474,8 @@ Recommendation: ship 1–3 and do not register a global https handler.
 ### 12.4 Notifications and background
 
 - Desktop notifications for new inbox replies, username mentions, and messages, sent with `GNotification` (portal-backed in Flatpak). Clicking a notification opens the item. Grouped when several arrive at once.
-- **Background checking:** when the user enables "Check for new messages in the background" in Preferences, Agora requests permission through the **Background portal** (with autostart), then keeps running hidden after the window closes and polls `/message/unread` every 5 minutes (configurable 5/15/30/60), backing off when offline or rate-limited.
+- **Inbox checks** follow the human-pace rules in §4.6: every 15 minutes while the window is open.
+- **Background checking** is **off by default**. When enabled in Preferences, Agora requests the **Background portal** (with autostart), keeps the hidden web view alive after the window closes, and checks unread messages every 30 or 60 minutes (no faster option). It pauses after 12 hours without the app being opened and stops on any captcha, 429 or sign-out.
 - Notifications are off for signed-out users.
 
 ### 12.5 Other integrations
@@ -449,9 +492,9 @@ Recommendation: ship 1–3 and do not register a global https handler.
 **General:** Default feed (Home/Popular), default sort, open links in Agora vs browser, mark posts read on open.
 **Appearance:** Large card previews, content text size (zoom slider, mirrors Ctrl+/-), show thumbnails, show scores.
 **Content:** Show NSFW content, blur NSFW media, blur spoilers, autoplay silent GIFs, muted subreddits (list editor), muted keywords (list editor; matched case-insensitively against titles and optionally comment text).
-**Notifications:** Enable notifications, background checking + interval, which types (replies, mentions, messages).
+**Notifications:** Enable notifications, background checking (off by default; 30 or 60 min), which types (replies, mentions, messages).
 **Storage:** cache size limit (100 MB / 250 MB / 500 MB / 1 GB), current usage, **Clear Cache** button.
-**Account:** Reddit client ID (change), signed-in user, Sign Out.
+**Account:** signed-in user, Sign Out, "Check Reddit connection" self-test (§4.5).
 
 All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 
@@ -459,10 +502,10 @@ All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 
 ## 14. Offline cache
 
-- **What:** the most recent pages of each feed the user viewed, opened posts with their loaded comments, all saved posts, thumbnails, and images the user has viewed.
+- **What:** only what the user actually viewed: feed pages they scrolled through, posts they opened with the comments they loaded, thumbnails and images that were on screen. Saved posts are cached when the user opens the Saved view, never by a bulk sync (§4.6).
 - **Where:** `$XDG_CACHE_HOME/agora/` (SQLite DB `cache.db` + `images/` content-addressed by URL hash). Drafts and preferences are not cache; drafts live in `$XDG_DATA_HOME/agora/agora.db`.
-- **Policy:** LRU eviction when over the size limit; saved posts are evicted last. Entries carry `fetched_at`; UI shows cached content immediately and refreshes in the background when online.
-- **Offline UX:** banner, read-only actions; votes/saves made offline are **not** queued in 1.0 (they show "You're offline" toast). **Open question:** queue offline actions in a later release?
+- **Policy:** LRU eviction when over the size limit; saved posts are evicted last. Entries carry `fetched_at`; UI shows cached content immediately and refreshes the one view on screen when online (no background refresh of other views).
+- **Offline UX:** banner, read-only actions; votes/saves made offline are **not** queued in 1.0 (they show "You're offline" toast). Decided: offline stays read-only.
 - Sign out clears personal cache (inbox, saved, drafts).
 
 ---
@@ -476,7 +519,7 @@ All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 
 ---
 
-## 16. Accessibility (Circle requirement, from day one)
+## 16. Accessibility (from day one)
 
 - Every custom widget sets an accessible role, label, and description (`gtk::Accessible`). Post rows announce: title, subreddit, author, age, score, comment count, vote state, badges.
 - Comment rows announce depth ("Level 3 reply by …") and collapsed state; expose `GTK_ACCESSIBLE_ROLE_TREE_ITEM` semantics where possible.
@@ -493,36 +536,44 @@ All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 - All user-facing strings through gettext; plurals via `ngettext`.
 - Dates and numbers via GLib (`GDateTime` formatting, locale-aware "3 hours ago").
 - RTL layouts tested (Hebrew/Arabic pseudolocale).
-- **Platform:** GNOME's Damned Lies requires hosting on GNOME GitLab. Since the repo is on GitHub, use **Weblate** (hosted.weblate.org libre plan). Revisit if the project moves to GNOME GitLab (`World/`) for Circle.
+- **Platform:** GNOME's Damned Lies requires hosting on GNOME GitLab. Since the repo is on GitHub, use **Weblate** (hosted.weblate.org libre plan). For the personal build, English plus gettext plumbing is enough; Weblate is set up only if an open-network build is published.
 
 ---
 
-## 18. GNOME Circle and HIG checklist
+## 18. HIG and packaging checklist
+
+This build is personal, so Flathub and GNOME Circle are **not goals**. The quality items still apply because they make the app good to use.
 
 | Requirement | How Agora meets it |
 |---|---|
-| Follows the GNOME HIG | libadwaita widgets throughout, adaptive layout, standard header bars, no custom window chrome |
-| Free license | GPL-3.0-or-later, CC0 metadata |
-| Code of Conduct | GNOME CoC in repo |
-| App icon | Original full-color icon in GNOME style (made with App Icon Preview, follows the icon guidelines), plus symbolic icon; no Reddit marks |
-| AppStream metadata | Complete: description, screenshots (light + dark), releases, content rating (OARS: user-generated content, social chat), `<branding>` colors, keywords |
-| Translatable | gettext + Weblate |
+| Follows the GNOME HIG | libadwaita widgets throughout, adaptive layout, `AdwToolbarView` (raised top bar on scrolled pages), no custom window chrome |
+| Window state | Size and maximised state persisted in GSettings |
+| About | `AdwAboutDialog::from_appdata` so release notes come from the metainfo; credits Giara |
+| License | GPL-3.0-or-later, CC0 metadata, GNOME CoC in repo |
+| App icon | Original icon per §2.1, symbolic icon designed first; no Reddit marks |
+| AppStream metadata | Valid (`appstreamcli validate`), so GNOME Software shows it properly for a local install |
+| Translatable | gettext throughout |
 | Accessible | §16 |
-| Adaptive / mobile | §5, tested at 360×640 |
-| Distributed on Flathub | Phase 6 |
-| Privacy | No telemetry; network traffic only to Reddit and the media hosts the user opens |
-| Maintained | Release notes per version, issue templates |
+| Adaptive / mobile | §5, tested at 360×640; desktop file has `X-Purism-FormFactor=Workstation;Mobile;` |
+| Privacy | No telemetry; network traffic only through the hidden web view to reddit.com and to Reddit's media CDNs |
 
-**Circle status (as of 2026-10-31):** on 2026-05-29 the GNOME Circle committee stopped accepting new submissions until its backlog clears, and adopted the AI policy already used for GNOME Shell extensions. Flathub tightened its AI policy at the same time. Agora is planned to be written largely by AI agents, so before treating Circle as a goal, read the current Circle criteria and Flathub policy text. The HIG, accessibility and quality targets in this table stand on their own either way; only Phase 7 is affected.
+**Circle and Flathub status, for a future open-network build:** Circle stopped taking new submissions on 2026-05-29 and adopted an AI-authorship policy; Flathub tightened its AI policy at the same time. Re-check both before publishing anything.
 
-Flatpak permissions (minimal): `--share=network`, `--socket=wayland`, `--socket=fallback-x11`, `--share=ipc`, `--device=dri`, `--socket=pulseaudio` (video audio). No filesystem access (portals only). Secret, Background, OpenURI, FileChooser, Notification all go through portals. `oo7` uses the Secret portal, so no `org.freedesktop.secrets` talk-name is requested.
+### 18.1 Flatpak manifest
+
+`build-aux/io.github.ClickCalickClick.Agora.Devel.json`, built locally with `flatpak-builder` (installed as a bundle, not submitted anywhere):
+- Runtime/SDK `org.gnome.Platform` / `org.gnome.Sdk` at the target version (§3.1), plus `org.freedesktop.Sdk.Extension.rust-stable`.
+- **WebKitGTK 6.0** (`webkitgtk-6.0`) comes from the GNOME runtime; no extra module. WP-00 adds a CI check that `pkg-config --modversion webkitgtk-6.0` succeeds in the SDK, and adds `libspelling` as a module only if the SDK lacks it.
+- Finish args: `--share=network`, `--share=ipc`, `--socket=wayland`, `--socket=fallback-x11`, `--device=dri`, `--socket=pulseaudio` (video audio). No filesystem access (portals for files). Background, OpenURI, FileChooser and Notification go through portals. No `org.freedesktop.secrets` talk-name (no secrets are stored outside WebKit's own profile).
+- WebKit's web process sandbox runs inside the Flatpak sandbox as in GNOME Web; no extra permissions needed.
 
 ---
 
 ## 19. Testing and quality
 
-- **Unit tests:** API models parsed from recorded JSON fixtures (no live API in CI); Markdown parser; URL router; filter matching; cache eviction.
-- **Integration:** a mock Reddit server (`wiremock`) for OAuth and listing flows.
+- **Unit tests:** every `agora-reddit-web` parser against recorded fixtures (JSON, HTML partials and page DOM snapshots; never live Reddit in CI); Markdown and HTML → AST; URL router; filter matching; cache eviction; pacing scheduler (time-mocked).
+- **Bridge integration:** a local test server serves saved reddit.com pages to a real hidden WebView under `xvfb-run`, so `ops/*.js` + parsers are tested end to end without touching Reddit.
+- **Live check:** `agora --self-test` (§4.5) against Jared's session, run by hand, never in CI.
 - **UI:** manual test script per phase (desktop, narrow 360 px, touch, keyboard-only, Orca).
 - **CI (GitHub Actions):** `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, Flatpak build with the target GNOME SDK, `GTK_A11Y=test` run to catch unlabeled widgets, `cargo deny`, `appstreamcli validate`, `desktop-file-validate`, `glib-compile-schemas --strict`.
 - Rust edition 2024; MSRV pinned to the Rust SDK extension of the target runtime.
@@ -536,28 +587,32 @@ Each phase ends with a usable build and the accessibility + keyboard walkthrough
 | Phase | Name | Delivers | Exit criteria |
 |---|---|---|---|
 | 0 | Foundations | Meson + Cargo scaffold, Flatpak manifest, CI, app ID, GSettings, i18n plumbing, empty `AdwApplicationWindow`, About dialog, CoC/README | CI green; Flatpak installs and launches |
-| 1 | Auth & API core | Welcome tour, client ID entry, OAuth loopback flow, keyring storage, app-only anonymous token, API client with rate limiting, typed models, fixtures | Sign in/out works; `/api/v1/me` shown in avatar popover |
+| 1 | Session & backend core | Welcome dialog, embedded login, persistent WebKit session, JS bridge, pacing scheduler, `Backend` trait + `RedditWebBackend` read operations, fixtures, self-test | Sign in/out works; username shown in avatar popover; feeds load through the hidden view |
 | 2 | Read-only browsing | Three-pane adaptive layout, sidebar with subscriptions, feeds + sorting, post rows with thumbnails, post view with text/link posts, comment tree with collapse + load more, Markdown renderer, empty/error states, keyboard nav j/k | Daily-driver for reading text posts on desktop and phone |
 | 3 | Media | Image viewer, galleries, inline video, GIF looping rules, NSFW/spoiler blur, large card previews, image cache | All common post types display correctly |
 | 4 | Interaction | Voting, saving, hiding, reporting, subscribe/unsubscribe, composer (all modes) with toolbar, preview, drafts, edit/delete, user profiles | Can post, reply, and edit end to end |
-| 5 | Inbox & desktop integration | Inbox, messages, notifications, Background portal checking, Shell search provider, URL routing + open-from-clipboard, share menu, search with scope toggle | All integrations working inside Flatpak |
-| 6 | Polish & release | Preferences complete, filters, offline cache with limits + Clear Cache, content zoom, full shortcuts dialog, icon, screenshots, AppStream, translations on Weblate, Orca audit | 1.0 on Flathub |
-| 7 | Circle (aspirational) | Apply to GNOME Circle if submissions are open and the AI policy permits it (§18) | Accepted into Circle |
+| 5 | Inbox & desktop integration | Inbox, messages, notifications, opt-in Background portal checking, Shell search provider, URL routing + open-from-clipboard, share menu, search with scope toggle | All integrations working inside Flatpak |
+| 6 | Polish & release | Preferences complete, filters, offline cache with limits + Clear Cache, content zoom, full shortcuts dialog, icon, screenshots, AppStream, Orca audit | 1.0 installed locally as a Flatpak bundle |
+| Later | Open-network build | `agora-lemmy` backend (Lemmy/PieFed), which could be published | Separate decision |
 | Later | | Multi-account, offline action queue, polls, share portal if available | |
 
 ---
 
-## 21. Open questions for the review
+## 21. Decisions and remaining questions
 
-1. Is Reddit self-service API registration (installed app) still available and free at personal-use volumes? (§4.1)
-2. ~~HTTP stack~~ Decided: `reqwest` + `tokio` thread behind one bridge (§3.2).
-3. External reddit.com links: confirm dropping the global URL-handler idea in favor of Open With / clipboard / drag-and-drop. (§12.2)
-4. Sharing: confirm the fallback share menu until a share portal exists. (§12.3)
-5. Hosting: stay on GitHub (Weblate) or move to GNOME GitLab `World/` for Damned Lies and Circle visibility? (§17)
-6. Queue offline votes/saves, or keep offline mode read-only? (§14)
-7. App ID: keep `io.github.ClickCalickClick.Agora` or buy a domain first? Changing it after Flathub release is painful. (§2)
-8. Name clash: keep "Agora" despite the Agora Linux App Store and Agora.io, or rename before the app ID is fixed? (§2)
-9. Circle: still a goal given closed submissions and the AI policy? (§18)
+Settled after the 2026-10-31 review (`SPEC-REVIEW.md`):
+1. **Data access:** no Reddit API; personal build using a logged-in WebKit session with a JS bridge (§4). Backend is pluggable for a later Lemmy/PieFed build.
+2. **HTTP:** `reqwest` + `tokio` on one thread, for media and tests only (§3.2).
+3. **External reddit.com links:** no global `https` handler. `GApplication` open-URI (desktop file `%U`), Ctrl+L open-from-clipboard, drag-and-drop (§12.2).
+4. **Sharing:** Copy Link / Open in Browser / Send by Email menu; no Share portal exists in GNOME 51 (§12.3).
+5. **Hosting:** GitHub; no Weblate until something is published (§17).
+6. **Offline:** read-only (§14).
+7. **App ID:** `io.github.ClickCalickClick.Agora` (§2).
+8. **Distribution:** local Flatpak bundle only; Flathub and Circle dropped for this build (§1, §18).
+
+Still open:
+- **Extraction strategies:** which of §4.5's three strategies works for each operation against the live site. Answered by WP-02 in `STRATEGIES.md` before wave 2.
+- **Name clash:** only matters if an open-network build is ever published (§2).
 
 ---
 
@@ -571,18 +626,18 @@ Development is planned to be split across multiple Opus 5.5 sub-agents, with a l
 2. **Stay in your lane:** an agent edits only the paths its WP owns. Changes needed elsewhere go back to the lead as a request, never as a drive-by edit.
 3. **Contracts before code:** shared types and traits live in `agora-core` and are frozen by WP-01 before parallel work starts. Changing a contract needs the lead's sign-off and a note in `docs/CONTRACTS-CHANGELOG.md`.
 4. **One branch and one PR per WP**, named `wp-NN-short-name`. The PR description lists the acceptance criteria with checkboxes.
-5. **Definition of done (all WPs):** `cargo fmt`, `cargo clippy -D warnings`, and `cargo test` pass for the touched crates; public items are documented; user-facing strings are translatable; UI WPs include the keyboard and screen-reader checks in §16 and a screenshot at 360 px and 1280 px widths.
-6. **Fixtures, not live API:** agents never call the real Reddit API in tests. They use JSON fixtures in `crates/agora-api/tests/fixtures/` (created by WP-02) or the mock server.
+5. **Definition of done (all WPs):** `cargo fmt`, `cargo clippy -D warnings`, and `cargo test` pass for the touched crates; public items are documented; user-facing strings are translatable; UI WPs include the keyboard and screen-reader checks in §16 and a screenshot at 360 px and 1280 px widths, taken under `xvfb-run` (use `ADW_DEBUG_ADAPTIVE_PREVIEW=1` for the narrow shot). If no display is available, the keyboard walkthrough checklist replaces the screenshots.
+6. **Fixtures, never live Reddit:** agents never send traffic to reddit.com. They use fixtures in `crates/agora-reddit-web/tests/fixtures/` (JSON, HTML partials, DOM snapshots). Fixtures are recorded only by the lead from Jared's session, with usernames and tokens scrubbed, and committed for agents to use.
 7. **No hand-edited shared lists:** WP-00 makes Meson generate the gresource XML and `po/POTFILES` from directory globs, and concatenates `data/resources/style/<module>.css` at build time. WP-06 pre-creates every `ui/<module>/mod.rs` stub named in §22.3. Later packages only add files inside the paths they own.
-8. **UI built against mocks:** UI WPs bind to stores fed by an in-memory `MockRedditClient` (implements the `RedditClient` trait from WP-01), so UI work never waits on the network layer.
+8. **UI built against mocks:** UI WPs bind to stores fed by an in-memory `MockBackend` (implements the `Backend` trait from WP-01), so UI work never waits on the network layer.
 
 ### 22.2 Contracts (frozen by WP-01)
 
 `agora-core` defines, at minimum:
 - IDs: `PostId`, `CommentId`, `SubredditName`, `Username`, `Fullname` (`t3_…`).
 - Models: `Post`, `Comment`, `MoreComments`, `Subreddit`, `User`, `Message`, `Listing<T>`, `Media` (Image, Gallery, Video, Gif, Link, None), `Vote`, `Sort`, `TimeRange`.
-- Traits: `RedditClient` (async: listings, comments, more-children, vote, save, submit, comment, inbox, search, subscribe…), `TokenStore`, `Cache` (get/put/evict, drafts).
-- `AgoraError` enum (Network, RateLimited { reset }, Unauthorized, NotFound, Forbidden, AppNotApproved, Parse, Io).
+- Traits: `Backend` (async: listings, comments, more-children, vote, save, submit, comment, inbox, search, subscribe…) with `Capabilities` (§4.3), `Cache` (get/put/evict, drafts).
+- `AgoraError` enum (Network, SessionExpired, Blocked { retry_after }, NotFound, Forbidden, ExtractorBroken { operation, strategy }, Parse, Io).
 - Markdown AST types (`Block`, `Inline`) consumed by the renderer.
 
 Also frozen as contracts (not in `agora-core`, but changed only with the lead's sign-off):
@@ -598,28 +653,28 @@ Also frozen as contracts (not in `agora-core`, but changed only with the lead's 
 | WP | Wave | Name | Owns (paths) | Spec | Deps | Acceptance (summary) |
 |---|---|---|---|---|---|---|
 | 00 | 0 | Scaffold & CI | root `Cargo.toml`, `meson.build`, `build-aux/`, `data/` (desktop, metainfo, complete gschema), `po/`, `.github/` | §2, §3, §13, §18, §19 | — | Flatpak builds and launches an empty `AdwApplicationWindow`; complete gschema frozen; gresource/POTFILES/CSS generated from globs; CI runs fmt, clippy, test, appstream/desktop validation |
-| 01 | 0 | Core contracts | `crates/agora-core/` | §3.4, §22.2 | 00 | All types/traits in §22.2 compile with docs; serde round-trip tests; `MockRedditClient` with sample data |
-| 02 | 1 | API client | `crates/agora-api/` (except `auth/`) | §4.4, §4.5 | 01 | Implements `RedditClient`; rate limiter honours headers; every endpoint parsed from fixtures; error mapping to `AgoraError` |
-| 03 | 1 | OAuth & tokens | `crates/agora-api/src/auth/`, keyring `TokenStore` impl | §4.1–4.3 | 01 | Loopback flow with state check, code exchange, refresh, revoke, app-only token; tested with `wiremock`; refresh token only in keyring |
+| 01 | 0 | Core contracts | `crates/agora-core/` | §3.4, §22.2 | 00 | All types/traits in §22.2 compile with docs; serde round-trip tests; `MockBackend` with sample data and capability toggles |
+| 02 | 1 | Reddit extractors | `crates/agora-reddit-web/js/ops/`, `src/parse/`, `src/backend.rs`, `STRATEGIES.md`, `tests/` | §4.3, §4.5, §4.7 | 01, 03 (bridge API only) | `RedditWebBackend` implements `Backend`; one `ops/*.js` + parser per operation with strategy fallback; writes confirmed by read-back; every parser tested on fixtures; `STRATEGIES.md` filled in from the lead's live run; `--self-test` |
+| 03 | 1 | Web session & bridge | `crates/agora-reddit-web/src/session/`, `src/bridge/`, `src/pacing/`, `js/agora-bridge.js` | §4.2, §4.4, §4.6 | 01 | Persistent `NetworkSession`; hidden view lifecycle; isolated script world; `postMessage` request/response with ids and timeouts; login detection, sign-out, session-expired signal; pacing scheduler with jitter, burst and backoff rules (time-mocked tests); bridge tested under `xvfb-run` against a local page |
 | 04 | 1 | Cache & drafts | `crates/agora-cache/` | §14, §9 (drafts) | 01 | SQLite schema + migrations; LRU eviction with saved-last rule; image cache; drafts CRUD; size reporting; clear cache |
-| 05 | 1 | Markdown parser | `crates/agora-markdown/` | §7.6 | 01 | Reddit extensions (spoilers, superscript, r/ u/ autolinks, tables); property tests; corpus of 50 real-world samples |
+| 05 | 1 | Markdown & HTML parser | `crates/agora-markdown/` | §4.5, §7.6 | 01 | Markdown with Reddit extensions (spoiler pre-pass, superscript, r/ u/ autolinks post-pass, tables) and sanitised HTML → same AST; property tests; corpus of 50 real-world samples recorded by the lead |
 | 06 | 1 | App shell & layout | `agora-app/src/ui/window*`, `ui/sidebar*`, `ui/*/mod.rs` stubs, `application.rs`, `rt.rs` | §5.1–5.2, §5.4, §11 (global keys) | 00, 01 | Three-pane adaptive layout with breakpoints; `AdwSidebar` sections; navigation actions (§22.2); tokio bridge; navigation and back gestures; status pages; works against mock client |
 | 07 | 1 | Stores | `agora-app/src/stores/` | §3.4 | 01 | GObject stores exposing `ListModel`s, pagination, refresh, optimistic vote/save; `docs/STORES.md` frozen; unit tests with mock client |
-| 08 | 2 | Onboarding & account | `ui/welcome*`, `ui/account*` | §6, §4.2 UX | 03, 06 | Welcome tour carousel; client ID validation; sign in/out; skip path; status page to resume setup |
+| 08 | 2 | Onboarding & account | `ui/welcome*`, `ui/account*`, `ui/login_dialog*` | §6, §4.4 | 03, 06 | Welcome carousel; embedded login dialog; sign in/out; session-expired banner; status page to resume sign-in |
 | 09 | 2 | Post list & rows | `ui/post_list*`, `ui/post_row*` | §7.1, §2.1 (quiet rows) | 06, 07 | Rows, thumbnails, badges, card mode toggle, context menu/long-press, pull-to-refresh, infinite scroll, j/k |
 | 10 | 2 | Markdown renderer | `agora-app/src/render/` | §7.6 | 05 | AST → GTK widgets incl. tables, code, quotes, spoilers; zoom scaling; accessible labels |
 | 11 | 2 | Post view | `ui/post_view*`, `ui/subreddit_header*` | §7.2, §2.1 (community headers) | 07, 10 | Header, link card, body, action bar, comment sort, subreddit header with Join |
-| 12 | 2 | Comment tree | `ui/comments*` | §8, §2.1 (conversation lines) | 07, 10 | Flattened virtualized tree, thread lines with accent hover, animated collapse, load more, continue thread, a11y depth |
+| 12 | 2 | Comment tree | `ui/comments*` | §8, §2.1 (conversation lines) | 07, 10 | Flattened virtualized tree, thread lines with accent hover, animated collapse (animate the hidden branch with `GtkRevealer`/opacity, never row height on recycled rows), load more, continue thread, a11y depth |
 | 13 | 2 | Media | `ui/media*`, `ui/viewer*` | §7.3–7.5 | 04, 06 | Inline images, galleries, Loupe-style viewer, video with HLS + fallback, GIF loop rules, NSFW/spoiler blur |
 | 14 | 3 | Composer | `ui/composer*` | §9 | 04, 10 | All post types, subreddit picker + requirements, toolbar, preview toggle, drafts autosave/restore, discard dialog |
 | 15 | 3 | Profiles & actions | `ui/profile*`, `ui/report*` | §5.3, §7.2 actions | 11, 12 | User profile tabs, report dialog, edit/delete own content, subscribe/unsubscribe |
-| 16 | 3 | Inbox & notifications | `ui/inbox*`, `services/notify*`, `services/background*` | §5.3, §12.4 | 07, 08 | Inbox tabs, mark read, compose message, GNotification, Background portal + polling with backoff |
+| 16 | 3 | Inbox & notifications | `ui/inbox*`, `services/notify*`, `services/background*` | §5.3, §12.4 | 07, 08 | Inbox tabs, mark read, compose message, GNotification, opt-in Background portal checking at human pace (§4.6, §12.4) |
 | 17 | 3 | Search & Shell provider | `ui/search*`, `services/search_provider*`, `data/*.search-provider.ini` | §10 | 04, 09 | Scoped search with toggle, result tabs, go-to-subreddit (Ctrl+K), D-Bus search provider from cache |
 | 18 | 3 | Links & sharing | `services/url_router*`, `ui/share_menu.rs` | §12.1–12.3 | 06 | Router with unit tests for all URL shapes, open-with/CLI args, clipboard open, drag-and-drop, share menu |
 | 19 | 3 | Preferences & filters | `ui/preferences*`, filter logic in `stores/filters*` | §13, §15 | 04, 07 | All preference pages bound to GSettings; muted subs/keywords with "N hidden" row; Clear Cache |
 | 20 | 4 | Identity & assets | `data/icons/`, status page illustrations, AppStream screenshots | §2.1, §18 | — (design can start any time) | App + symbolic icon per guidelines, empty-state art, branding colors, screenshots light/dark |
-| 21 | 4 | Accessibility & i18n audit | edit rights across `agora-app` for a11y/i18n fixes only (lead reviews); `po/` | §16, §17 | 08–19 | Orca and keyboard-only pass on every screen; RTL check; Weblate set up |
-| 22 | 4 | Release | Flathub manifest, release notes | §18, §20 | all | Flathub submission passes review |
+| 21 | 4 | Accessibility & i18n audit | edit rights across `agora-app` for a11y/i18n fixes only (lead reviews); `po/` | §16, §17 | 08–19 | Orca and keyboard-only pass on every screen; RTL check |
+| 22 | 4 | Local release | Flatpak bundle build script, release notes | §18.1, §20 | all | `flatpak-builder` produces an installable bundle; app runs signed-in for a day of normal use with no captcha or block |
 
 ### 22.4 Waves and parallelism
 
@@ -629,7 +684,7 @@ Also frozen as contracts (not in `agora-core`, but changed only with the lead's 
 - **Wave 3** (up to 6 agents): WP-14 to 19.
 - **Wave 4**: WP-21 and WP-22; WP-20 runs alongside any wave.
 
-The lead agent merges each wave, runs the full app against the real API with Jared's client ID, and fixes integration seams before starting the next wave.
+The lead agent merges each wave, runs the full app against Jared's live session (at human pace), and fixes integration seams before starting the next wave.
 
 ### 22.5 Brief template for each WP
 
