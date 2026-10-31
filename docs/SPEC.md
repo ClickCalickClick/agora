@@ -15,7 +15,7 @@ This document is the single source of truth for what Agora does and how it is bu
 ### Goals
 
 1. Feel like a first-party GNOME app: HIG-compliant, adaptive, accessible, translatable.
-2. Meet the [GNOME Circle](https://circle.gnome.org/) criteria so the app can apply after 1.0.
+2. Meet the [GNOME Circle](https://circle.gnome.org/) quality bar (HIG, accessibility, CoC, Flathub). Applying to Circle itself is **aspirational**: see the status note in §18.
 3. Cover everyday Reddit use: browsing, reading, voting, posting, replying, and the inbox.
 4. Work equally well with mouse and keyboard, touch, and a screen reader.
 5. Distribute on Flathub.
@@ -25,7 +25,7 @@ This document is the single source of truth for what Agora does and how it is bu
 - Moderation tools (mod queue, removals, flair management, mod mail). Out of scope permanently, not just deferred.
 - Chat (Reddit's chat API is not public).
 - Swipe-to-vote or swipe-to-save gestures. Swipes are for navigation only.
-- Support for GNOME versions older than 49 or libadwaita older than 1.8.
+- Support for anything older than the current stable GNOME runtime (§3.1).
 - Multiple accounts in 1.0 (kept possible in the data model; see §8.3).
 - A bundled Reddit API key. Users register their own client ID.
 
@@ -49,7 +49,7 @@ This document is the single source of truth for what Agora does and how it is bu
 
 **Trademark note:** the app must not use the Reddit logo or Snoo in its icon, and AppStream must state that Agora is an unofficial client not affiliated with Reddit, Inc.
 
-**Open question:** confirm "Agora" is not already used by a Flathub app or a prominent GNOME/Linux project before the first public release.
+**Name clash (decide before WP-00 bakes in the app ID):** no Flathub app is called Agora, but the "Agora Linux App Store" (agoralinux.app, a Flatpak directory built on Flathub) and Agora.io (a well-known real-time SDK vendor) both exist. A community app named Agora next to a Flatpak store named Agora may confuse Flathub searches. If the name changes, the app ID changes with it, before the first Flathub submission. The `io.github.ClickCalickClick.Agora` ID is otherwise correct: Flathub verifies `io.github.*` IDs against the matching GitHub repo.
 
 ### 2.1 Visual identity
 
@@ -85,17 +85,18 @@ Agora must be recognisably its own app while looking unmistakably GNOME. The rul
 
 ### 3.1 Platform target
 
-- GNOME 49 runtime (`org.gnome.Platform//49`), GTK 4.20, libadwaita 1.8.
+- **Target: the current stable GNOME runtime.** As of this spec that is **GNOME 51** (`org.gnome.Platform//51`), **GTK 4.23**, **libadwaita 1.10**. This line is the only place the version is stated; everything else says "the target runtime".
 - No compatibility shims for older versions. Bump to each new GNOME runtime within one cycle.
+- Newer libadwaita/GTK features the spec relies on: `AdwSidebar` with sections (§5.1), `AdwCssClassBinding` (read-state and vote-state styling), `GtkEnumList` for sort dropdowns, and GTK's built-in reduced-motion handling in Spinner, Stack and Revealer.
 
 ### 3.2 Language and core crates
 
 | Concern | Crate | Notes |
 |---|---|---|
-| UI | `gtk4`, `libadwaita` (gtk-rs) | Feature flags pinned to GTK 4.20 / adw 1.8 |
+| UI | `gtk4`, `libadwaita` (gtk-rs) | Feature flags pinned to the target runtime's GTK / libadwaita (§3.1) |
 | UI definitions | Blueprint (`.blp`) compiled to `.ui` | Composite templates via `#[derive(CompositeTemplate)]` |
 | GObject / async | `glib`, `gio` | UI work runs on the GLib main context |
-| HTTP | `reqwest` (rustls) on a `tokio` runtime | Runtime lives on a background thread; results return to the main context via `glib::spawn_future_local` + channels. **Open question:** evaluate `soup3` (libsoup, GLib-native, used by many GNOME apps) as an alternative that avoids running two event loops. |
+| HTTP | `reqwest` (rustls) on a `tokio` runtime | **Decided.** One `tokio` runtime on a dedicated thread. A single bridge helper `spawn_tokio(fut)` in `agora-app/src/rt.rs` (owned by WP-06) sends results back over a `oneshot` channel awaited with `glib::spawn_future_local`. No tokio types anywhere else in `agora-app`. Keeps library crates testable with `#[tokio::test]` and no display. |
 | JSON | `serde`, `serde_json` | Typed models for Reddit "Thing" objects |
 | Portals | `ashpd` | Background, OpenURI, Secret, Settings |
 | D-Bus | `zbus` | GNOME Shell search provider |
@@ -127,8 +128,8 @@ agora/
 │   ├── *.desktop.in.in, *.metainfo.xml.in.in, *.gschema.xml.in
 │   ├── *.search-provider.ini
 │   ├── icons/ (scalable + symbolic)
-│   └── resources/ (Blueprint files, CSS, resources.gresource.xml)
-├── po/  (LINGUAS, POTFILES.in)
+│   └── resources/ (Blueprint files, style/<module>.css; gresource XML generated at build)
+├── po/  (LINGUAS; POTFILES generated at build)
 ├── crates/agora-app/src/
 │   ├── main.rs, application.rs, config.rs.in
 │   ├── stores/     # GObject stores (Session, Feed, Thread, Inbox, Prefs)
@@ -219,11 +220,11 @@ Wide (≥ 1100 sp)
 │ ⌕ Search     │ [Hot ▾]   r/gnome    │ r/gnome · u/someone · 3h      │
 │ Home         │ ┌──────────────────┐ │ Title of the post             │
 │ Popular      │ │▢ Title…       ▲ 42│ │ [media]                       │
-│ All          │ │  r/gnome · 3h  💬9│ │ body text…                    │
-│ Saved        │ └──────────────────┘ │ ▲ 42 ▼   💬 9   ⋯              │
-│ Inbox (3)    │ ┌──────────────────┐ │ ── Comments ──                │
-│ ── Subs ──   │ │…                 │ │ │ comment                     │
-│ r/gnome      │ └──────────────────┘ │ │  │ reply                    │
+│ Saved        │ │  r/gnome · 3h  💬9│ │ body text…                    │
+│ Inbox (3)    │ └──────────────────┘ │ ▲ 42 ▼   💬 9   ⋯              │
+│ ── Subs ──   │ ┌──────────────────┐ │ ── Comments ──                │
+│ r/gnome      │ │…                 │ │ │ comment                     │
+│ r/rust       │ └──────────────────┘ │ │  │ reply                    │
 └──────────────┴──────────────────────┴───────────────────────────────┘
 
 Medium (≈ 700–1100 sp): sidebar collapses into an overlay; list + post view stay side by side.
@@ -231,7 +232,7 @@ Narrow (< 700 sp, phones): single pane, navigation stack: Sidebar → List → P
 ```
 
 - Implemented with an outer `AdwOverlaySplitView` (sidebar) wrapping an `AdwNavigationSplitView` (list / content), driven by `AdwBreakpoint`s. Exact breakpoints are tuned in Phase 2.
-- Sidebar uses the libadwaita sidebar style (`.navigation-sidebar`), with sections: Feeds (Home, Popular, All), You (Saved, Inbox, Profile), Subscriptions (alphabetical, favorites pinned on top).
+- Sidebar is an `AdwSidebar` with sections (stock HIG look, keyboard handling and overlay style): Feeds (Home, Popular), You (Saved, Inbox, Profile), Subscriptions (alphabetical, favorites pinned on top). There is no "All" feed: Reddit removed r/all in April 2025.
 - Each pane has its own `AdwHeaderBar`. The sort dropdown (Best/Hot/New/Top/Rising, Top with time range) lives in the list pane's header bar.
 - Back navigation: `AdwNavigationView` provides the back button, Alt+←, mouse back button, and the edge-swipe gesture on touch.
 
@@ -373,7 +374,7 @@ One composer used for new posts, replies, edits, and messages; opened as an `Adw
 ## 10. Search
 
 - `Ctrl+F` or the search button opens a `GtkSearchBar` in the post list pane.
-- **Scope:** when inside a subreddit, search is scoped to it by default, with a toggle "Search all of Reddit". On Home/Popular/All it searches everything.
+- **Scope:** when inside a subreddit, search is scoped to it by default, with a toggle "Search all of Reddit". On Home/Popular it searches everything.
 - Results tabs: Posts, Subreddits, Users. Sort and time-range options in a dropdown.
 - The sidebar search entry filters subscriptions instantly and offers "Go to r/…" for any typed name.
 - **GNOME Shell search provider:** registered via `*.search-provider.ini` and the `org.gnome.Shell.SearchProvider2` D-Bus interface (zbus). Returns the user's subscribed subreddits that match first, then cached popular subreddits; activating a result opens Agora on that subreddit. Never hits the network for every keystroke; uses the cache.
@@ -445,7 +446,7 @@ Recommendation: ship 1–3 and do not register a global https handler.
 
 ## 13. Preferences (`AdwPreferencesDialog`)
 
-**General:** Default feed (Home/Popular/All), default sort, open links in Agora vs browser, mark posts read on open.
+**General:** Default feed (Home/Popular), default sort, open links in Agora vs browser, mark posts read on open.
 **Appearance:** Large card previews, content text size (zoom slider, mirrors Ctrl+/-), show thumbnails, show scores.
 **Content:** Show NSFW content, blur NSFW media, blur spoilers, autoplay silent GIFs, muted subreddits (list editor), muted keywords (list editor; matched case-insensitively against titles and optionally comment text).
 **Notifications:** Enable notifications, background checking + interval, which types (replies, mentions, messages).
@@ -469,7 +470,7 @@ All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 ## 15. Filters
 
 - **NSFW:** §7.5.
-- **Muted subreddits:** their posts are removed from Home/Popular/All; visiting the subreddit directly still works with a banner "You muted this subreddit · Unmute".
+- **Muted subreddits:** their posts are removed from Home and Popular; visiting the subreddit directly still works with a banner "You muted this subreddit · Unmute".
 - **Muted keywords:** posts whose titles match are hidden from feeds. A collapsed "N posts hidden by filters" row appears at the end of a page so filtering is never silent.
 - Filtering is local only (not synced to Reddit).
 
@@ -512,7 +513,9 @@ All persisted in GSettings (`io.github.ClickCalickClick.Agora.gschema.xml`).
 | Privacy | No telemetry; network traffic only to Reddit and the media hosts the user opens |
 | Maintained | Release notes per version, issue templates |
 
-Flatpak permissions (minimal): `--share=network`, `--socket=wayland`, `--socket=fallback-x11`, `--share=ipc`, `--device=dri`, `--socket=pulseaudio` (video audio). No filesystem access (portals only). Secret, Background, OpenURI, FileChooser, Notification all go through portals. Talk name `org.freedesktop.secrets` only if `oo7` needs it outside the portal.
+**Circle status (as of 2026-10-31):** on 2026-05-29 the GNOME Circle committee stopped accepting new submissions until its backlog clears, and adopted the AI policy already used for GNOME Shell extensions. Flathub tightened its AI policy at the same time. Agora is planned to be written largely by AI agents, so before treating Circle as a goal, read the current Circle criteria and Flathub policy text. The HIG, accessibility and quality targets in this table stand on their own either way; only Phase 7 is affected.
+
+Flatpak permissions (minimal): `--share=network`, `--socket=wayland`, `--socket=fallback-x11`, `--share=ipc`, `--device=dri`, `--socket=pulseaudio` (video audio). No filesystem access (portals only). Secret, Background, OpenURI, FileChooser, Notification all go through portals. `oo7` uses the Secret portal, so no `org.freedesktop.secrets` talk-name is requested.
 
 ---
 
@@ -521,8 +524,8 @@ Flatpak permissions (minimal): `--share=network`, `--socket=wayland`, `--socket=
 - **Unit tests:** API models parsed from recorded JSON fixtures (no live API in CI); Markdown parser; URL router; filter matching; cache eviction.
 - **Integration:** a mock Reddit server (`wiremock`) for OAuth and listing flows.
 - **UI:** manual test script per phase (desktop, narrow 360 px, touch, keyboard-only, Orca).
-- **CI (GitHub Actions):** `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, Flatpak build with the GNOME 49 SDK, `appstreamcli validate`, `desktop-file-validate`, `glib-compile-schemas --strict`.
-- Rust edition 2024; MSRV pinned to the Rust SDK extension in the GNOME 49 runtime.
+- **CI (GitHub Actions):** `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, Flatpak build with the target GNOME SDK, `GTK_A11Y=test` run to catch unlabeled widgets, `cargo deny`, `appstreamcli validate`, `desktop-file-validate`, `glib-compile-schemas --strict`.
+- Rust edition 2024; MSRV pinned to the Rust SDK extension of the target runtime.
 
 ---
 
@@ -539,7 +542,7 @@ Each phase ends with a usable build and the accessibility + keyboard walkthrough
 | 4 | Interaction | Voting, saving, hiding, reporting, subscribe/unsubscribe, composer (all modes) with toolbar, preview, drafts, edit/delete, user profiles | Can post, reply, and edit end to end |
 | 5 | Inbox & desktop integration | Inbox, messages, notifications, Background portal checking, Shell search provider, URL routing + open-from-clipboard, share menu, search with scope toggle | All integrations working inside Flatpak |
 | 6 | Polish & release | Preferences complete, filters, offline cache with limits + Clear Cache, content zoom, full shortcuts dialog, icon, screenshots, AppStream, translations on Weblate, Orca audit | 1.0 on Flathub |
-| 7 | Circle | Apply to GNOME Circle; address review feedback | Accepted into Circle |
+| 7 | Circle (aspirational) | Apply to GNOME Circle if submissions are open and the AI policy permits it (§18) | Accepted into Circle |
 | Later | | Multi-account, offline action queue, polls, share portal if available | |
 
 ---
@@ -547,13 +550,14 @@ Each phase ends with a usable build and the accessibility + keyboard walkthrough
 ## 21. Open questions for the review
 
 1. Is Reddit self-service API registration (installed app) still available and free at personal-use volumes? (§4.1)
-2. HTTP stack: `reqwest` + `tokio` thread, or `soup3` on the GLib loop? (§3.2)
+2. ~~HTTP stack~~ Decided: `reqwest` + `tokio` thread behind one bridge (§3.2).
 3. External reddit.com links: confirm dropping the global URL-handler idea in favor of Open With / clipboard / drag-and-drop. (§12.2)
 4. Sharing: confirm the fallback share menu until a share portal exists. (§12.3)
 5. Hosting: stay on GitHub (Weblate) or move to GNOME GitLab `World/` for Damned Lies and Circle visibility? (§17)
 6. Queue offline votes/saves, or keep offline mode read-only? (§14)
 7. App ID: keep `io.github.ClickCalickClick.Agora` or buy a domain first? Changing it after Flathub release is painful. (§2)
-8. Name clash check for "Agora". (§2)
+8. Name clash: keep "Agora" despite the Agora Linux App Store and Agora.io, or rename before the app ID is fixed? (§2)
+9. Circle: still a goal given closed submissions and the AI policy? (§18)
 
 ---
 
@@ -569,7 +573,8 @@ Development is planned to be split across multiple Opus 5.5 sub-agents, with a l
 4. **One branch and one PR per WP**, named `wp-NN-short-name`. The PR description lists the acceptance criteria with checkboxes.
 5. **Definition of done (all WPs):** `cargo fmt`, `cargo clippy -D warnings`, and `cargo test` pass for the touched crates; public items are documented; user-facing strings are translatable; UI WPs include the keyboard and screen-reader checks in §16 and a screenshot at 360 px and 1280 px widths.
 6. **Fixtures, not live API:** agents never call the real Reddit API in tests. They use JSON fixtures in `crates/agora-api/tests/fixtures/` (created by WP-02) or the mock server.
-7. **UI built against mocks:** UI WPs bind to stores fed by an in-memory `MockRedditClient` (implements the `RedditClient` trait from WP-01), so UI work never waits on the network layer.
+7. **No hand-edited shared lists:** WP-00 makes Meson generate the gresource XML and `po/POTFILES` from directory globs, and concatenates `data/resources/style/<module>.css` at build time. WP-06 pre-creates every `ui/<module>/mod.rs` stub named in §22.3. Later packages only add files inside the paths they own.
+8. **UI built against mocks:** UI WPs bind to stores fed by an in-memory `MockRedditClient` (implements the `RedditClient` trait from WP-01), so UI work never waits on the network layer.
 
 ### 22.2 Contracts (frozen by WP-01)
 
@@ -580,20 +585,26 @@ Development is planned to be split across multiple Opus 5.5 sub-agents, with a l
 - `AgoraError` enum (Network, RateLimited { reset }, Unauthorized, NotFound, Forbidden, AppNotApproved, Parse, Io).
 - Markdown AST types (`Block`, `Inline`) consumed by the renderer.
 
+Also frozen as contracts (not in `agora-core`, but changed only with the lead's sign-off):
+- **GSettings schema:** WP-00 ships the *complete* `io.github.ClickCalickClick.Agora.gschema.xml` with every key from §13 (plus window size and maximised state), not stubs. No other WP edits it.
+- **Stores:** WP-07 ships `docs/STORES.md` listing each store's GObject properties, signals, actions and `ListModel` item types. Frozen at the end of wave 1; wave-2 UI packages bind only to what it lists.
+- **Navigation:** window actions `win.open-post(s)`, `win.open-subreddit(s)`, `win.open-user(s)`, `win.open-url(s)`, `win.continue-thread(s)`, defined by WP-06 and listed in `docs/STORES.md`, so no UI package needs the window type.
+- **Cross-package widgets:** `MediaView::new(&Media)` (built by WP-13, mounted by WP-11) and `ShareMenu::for_url(&str)` (built by WP-18, used by WP-09/11/12).
+
 ### 22.3 Work packages
 
 `Deps` lists WPs that must be merged first. WPs in the same wave can run in parallel.
 
 | WP | Wave | Name | Owns (paths) | Spec | Deps | Acceptance (summary) |
 |---|---|---|---|---|---|---|
-| 00 | 0 | Scaffold & CI | root `Cargo.toml`, `meson.build`, `build-aux/`, `data/` (desktop, metainfo, gschema stubs), `po/`, `.github/` | §2, §3, §18, §19 | — | Flatpak builds and launches an empty `AdwApplicationWindow`; CI runs fmt, clippy, test, appstream/desktop validation |
+| 00 | 0 | Scaffold & CI | root `Cargo.toml`, `meson.build`, `build-aux/`, `data/` (desktop, metainfo, complete gschema), `po/`, `.github/` | §2, §3, §13, §18, §19 | — | Flatpak builds and launches an empty `AdwApplicationWindow`; complete gschema frozen; gresource/POTFILES/CSS generated from globs; CI runs fmt, clippy, test, appstream/desktop validation |
 | 01 | 0 | Core contracts | `crates/agora-core/` | §3.4, §22.2 | 00 | All types/traits in §22.2 compile with docs; serde round-trip tests; `MockRedditClient` with sample data |
 | 02 | 1 | API client | `crates/agora-api/` (except `auth/`) | §4.4, §4.5 | 01 | Implements `RedditClient`; rate limiter honours headers; every endpoint parsed from fixtures; error mapping to `AgoraError` |
 | 03 | 1 | OAuth & tokens | `crates/agora-api/src/auth/`, keyring `TokenStore` impl | §4.1–4.3 | 01 | Loopback flow with state check, code exchange, refresh, revoke, app-only token; tested with `wiremock`; refresh token only in keyring |
 | 04 | 1 | Cache & drafts | `crates/agora-cache/` | §14, §9 (drafts) | 01 | SQLite schema + migrations; LRU eviction with saved-last rule; image cache; drafts CRUD; size reporting; clear cache |
 | 05 | 1 | Markdown parser | `crates/agora-markdown/` | §7.6 | 01 | Reddit extensions (spoilers, superscript, r/ u/ autolinks, tables); property tests; corpus of 50 real-world samples |
-| 06 | 1 | App shell & layout | `agora-app/src/ui/window*`, `ui/sidebar*`, `application.rs` | §5.1–5.2, §5.4, §11 (global keys) | 00, 01 | Three-pane adaptive layout with breakpoints; sidebar sections; navigation and back gestures; status pages; works against mock client |
-| 07 | 1 | Stores | `agora-app/src/stores/` | §3.4 | 01 | GObject stores exposing `ListModel`s, pagination, refresh, optimistic vote/save; unit tests with mock client |
+| 06 | 1 | App shell & layout | `agora-app/src/ui/window*`, `ui/sidebar*`, `ui/*/mod.rs` stubs, `application.rs`, `rt.rs` | §5.1–5.2, §5.4, §11 (global keys) | 00, 01 | Three-pane adaptive layout with breakpoints; `AdwSidebar` sections; navigation actions (§22.2); tokio bridge; navigation and back gestures; status pages; works against mock client |
+| 07 | 1 | Stores | `agora-app/src/stores/` | §3.4 | 01 | GObject stores exposing `ListModel`s, pagination, refresh, optimistic vote/save; `docs/STORES.md` frozen; unit tests with mock client |
 | 08 | 2 | Onboarding & account | `ui/welcome*`, `ui/account*` | §6, §4.2 UX | 03, 06 | Welcome tour carousel; client ID validation; sign in/out; skip path; status page to resume setup |
 | 09 | 2 | Post list & rows | `ui/post_list*`, `ui/post_row*` | §7.1, §2.1 (quiet rows) | 06, 07 | Rows, thumbnails, badges, card mode toggle, context menu/long-press, pull-to-refresh, infinite scroll, j/k |
 | 10 | 2 | Markdown renderer | `agora-app/src/render/` | §7.6 | 05 | AST → GTK widgets incl. tables, code, quotes, spoilers; zoom scaling; accessible labels |
@@ -604,10 +615,10 @@ Development is planned to be split across multiple Opus 5.5 sub-agents, with a l
 | 15 | 3 | Profiles & actions | `ui/profile*`, `ui/report*` | §5.3, §7.2 actions | 11, 12 | User profile tabs, report dialog, edit/delete own content, subscribe/unsubscribe |
 | 16 | 3 | Inbox & notifications | `ui/inbox*`, `services/notify*`, `services/background*` | §5.3, §12.4 | 07, 08 | Inbox tabs, mark read, compose message, GNotification, Background portal + polling with backoff |
 | 17 | 3 | Search & Shell provider | `ui/search*`, `services/search_provider*`, `data/*.search-provider.ini` | §10 | 04, 09 | Scoped search with toggle, result tabs, go-to-subreddit (Ctrl+K), D-Bus search provider from cache |
-| 18 | 3 | Links & sharing | `services/url_router*`, share menu | §12.1–12.3 | 06 | Router with unit tests for all URL shapes, open-with/CLI args, clipboard open, drag-and-drop, share menu |
-| 19 | 3 | Preferences & filters | `ui/preferences*`, filter logic in `stores/filters*`, gschema keys | §13, §15 | 04, 07 | All preference pages bound to GSettings; muted subs/keywords with "N hidden" row; Clear Cache |
+| 18 | 3 | Links & sharing | `services/url_router*`, `ui/share_menu.rs` | §12.1–12.3 | 06 | Router with unit tests for all URL shapes, open-with/CLI args, clipboard open, drag-and-drop, share menu |
+| 19 | 3 | Preferences & filters | `ui/preferences*`, filter logic in `stores/filters*` | §13, §15 | 04, 07 | All preference pages bound to GSettings; muted subs/keywords with "N hidden" row; Clear Cache |
 | 20 | 4 | Identity & assets | `data/icons/`, status page illustrations, AppStream screenshots | §2.1, §18 | — (design can start any time) | App + symbolic icon per guidelines, empty-state art, branding colors, screenshots light/dark |
-| 21 | 4 | Accessibility & i18n audit | fixes filed as issues to owning WPs; `po/` | §16, §17 | 08–19 | Orca and keyboard-only pass on every screen; RTL check; Weblate set up |
+| 21 | 4 | Accessibility & i18n audit | edit rights across `agora-app` for a11y/i18n fixes only (lead reviews); `po/` | §16, §17 | 08–19 | Orca and keyboard-only pass on every screen; RTL check; Weblate set up |
 | 22 | 4 | Release | Flathub manifest, release notes | §18, §20 | all | Flathub submission passes review |
 
 ### 22.4 Waves and parallelism
@@ -632,6 +643,9 @@ Owns: <paths>        Must not edit: everything else
 Depends on (merged): <WPs>     Contracts used: <types/traits>
 Deliverables: <list>
 Acceptance criteria: <checklist, copied from §22.3 and expanded>
+Mock scenarios to cover: empty, error, offline, 1000 items, RTL, 360 px
+Contracts you may NOT change: <list>
+Questions to ask the lead before starting: <list>
 Out of scope: <explicit list>
 Hand-back: PR link + notes on any contract change requests
 ```
