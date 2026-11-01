@@ -318,7 +318,8 @@ impl AgoraWindow {
                     imp.feed_page.act_on_selected(action)
                 }
             }
-            Key::space if in_post => imp.post_page.toggle_selected(),
+            // Space on a focused button presses the button, as usual.
+            Key::space if in_post && !self.focus_is_button() => imp.post_page.toggle_selected(),
             _ => false,
         };
         if handled {
@@ -326,6 +327,17 @@ impl AgoraWindow {
         } else {
             glib::Propagation::Proceed
         }
+    }
+
+    fn focus_is_button(&self) -> bool {
+        // Space belongs to the focused control unless it is a comment row itself.
+        gtk::prelude::GtkWindowExt::focus(self).is_some_and(|w| {
+            w.is::<gtk::Button>()
+                || w.is::<gtk::ListBoxRow>()
+                || w.ancestor(gtk::Button::static_type()).is_some()
+                || w.ancestor(gtk::MenuButton::static_type()).is_some()
+                || !w.is_ancestor(&*self.imp().post_page)
+        })
     }
 
     fn post_has_focus(&self) -> bool {

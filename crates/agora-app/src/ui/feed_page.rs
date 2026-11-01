@@ -20,7 +20,8 @@ type OpenHandler = Box<dyn Fn(&PostObject)>;
 mod imp {
     use super::*;
 
-    #[derive(Default, gtk::CompositeTemplate)]
+    #[derive(Default, gtk::CompositeTemplate, glib::Properties)]
+    #[properties(wrapper_type = super::AgoraFeedPage)]
     #[template(resource = "/io/github/ClickCalickClick/Agora/ui/feed_page.ui")]
     pub struct AgoraFeedPage {
         #[template_child]
@@ -46,7 +47,9 @@ mod imp {
         pub footer: OnceCell<FooterObject>,
         pub footer_store: OnceCell<gio::ListStore>,
         pub on_open: OnceCell<OpenHandler>,
-        pub sort_action: RefCell<Option<gio::SimpleAction>>,
+        /// `feed.sort` state: `best`, `hot`, `new`, `rising` or `top:<range>`.
+        #[property(get, set = Self::set_sort_target)]
+        pub sort_target: RefCell<String>,
     }
 
     #[glib::object_subclass]
@@ -58,6 +61,14 @@ mod imp {
         fn class_init(klass: &mut Self::Class) {
             klass.bind_template();
             klass.bind_template_instance_callbacks();
+            // Widget actions (not an inserted group) so header buttons and
+            // menus resolve them from the template.
+            klass.install_action("feed.refresh", None, |page, _, _| {
+                if let Some(store) = page.imp().store.get() {
+                    store.refresh();
+                }
+            });
+            klass.install_property_action("feed.sort", "sort-target");
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -65,7 +76,22 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for AgoraFeedPage {}
+
+    impl AgoraFeedPage {
+        fn set_sort_target(&self, target: String) {
+            if *self.sort_target.borrow() == target {
+                return;
+            }
+            self.sort_target.replace(target.clone());
+            let (key, range) = target.split_once(':').unwrap_or((&target, ""));
+            let range = TimeRange::from_key(range).unwrap_or_default();
+            if let (Some(sort), Some(store)) = (Sort::from_key(key, range), self.store.get()) {
+                store.set_sort(sort);
+            }
+        }
+    }
     impl WidgetImpl for AgoraFeedPage {}
     impl NavigationPageImpl for AgoraFeedPage {}
 }
@@ -121,37 +147,6 @@ impl AgoraFeedPage {
         imp.list_view.set_factory(Some(&self.factory(store)));
 
         // Actions: feed.refresh and feed.sort.
-        let group = gio::SimpleActionGroup::new();
-        let refresh = gio::SimpleAction::new("refresh", None);
-        refresh.connect_activate(glib::clone!(
-            #[weak]
-            store,
-            move |_, _| store.refresh()
-        ));
-        group.add_action(&refresh);
-        let sort = gio::SimpleAction::new_stateful(
-            "sort",
-            Some(glib::VariantTy::STRING),
-            &sort_target(store.sort()).to_variant(),
-        );
-        sort.connect_activate(glib::clone!(
-            #[weak]
-            store,
-            move |action, param| {
-                let Some(target) = param.and_then(|p| p.get::<String>()) else {
-                    return;
-                };
-                let (key, range) = target.split_once(':').unwrap_or((&target, ""));
-                let range = TimeRange::from_key(range).unwrap_or_default();
-                if let Some(sort) = Sort::from_key(key, range) {
-                    action.set_state(&target.to_variant());
-                    store.set_sort(sort);
-                }
-            }
-        ));
-        group.add_action(&sort);
-        self.insert_action_group("feed", Some(&group));
-        imp.sort_action.replace(Some(sort));
 
         for prop in ["state", "error", "title", "sort-key", "top-range"] {
             store.connect_notify_local(
@@ -181,16 +176,20 @@ impl AgoraFeedPage {
         // Infinite scroll, driven by the user's scrolling only: nothing loads
         // ahead unless the user is near the end (no prefetch).
         let adj = imp.scroller.vadjustment();
-        adj.connect_value_changed(glib::clone!(
+        let near_end = glib::clone!(
             #[weak]
             store,
-            move |adj| {
+            move |adj: &gtk::Adjustment| {
                 let remaining = adj.upper() - adj.value() - adj.page_size();
-                if adj.upper() > adj.page_size() && remaining < LOAD_AHEAD_ROWS * TYPICAL_ROW_HEIGHT {
+                if remaining < LOAD_AHEAD_ROWS * TYPICAL_ROW_HEIGHT && store.posts().n_items() > 0 {
                     store.load_more();
                 }
             }
-        ));
+        );
+        adj.connect_value_changed(near_end.clone());
+        // A first page shorter than a tall window cannot be scrolled; it
+        // counts as being at the end, which is what the user sees.
+        adj.connect_upper_notify(near_end);
         let _ = imp.store.set(store.clone());
         let _ = imp.selection.set(selection);
         let _ = imp.header.set(header);
@@ -266,6 +265,8 @@ impl AgoraFeedPage {
             let item = item.downcast_ref::<gtk::ListItem>().unwrap();
             if let Some(row) = item.child().and_downcast::<AgoraPostRow>() {
                 row.unbind();
+            } else if let Some(child) = item.child() {
+                super::release_watch(&child);
             }
         });
         factory
@@ -276,8 +277,9 @@ impl AgoraFeedPage {
         let Some(store) = imp.store.get() else { return };
         imp.title_widget.set_title(&store.title());
         imp.title_widget.set_subtitle(&sort_label(store.sort()));
-        if let Some(action) = imp.sort_action.borrow().as_ref() {
-            action.set_state(&sort_target(store.sort()).to_variant());
+        let target = sort_target(store.sort());
+        if imp.sort_target.replace(target.clone()) != target {
+            self.notify_sort_target();
         }
         imp.sort_button.set_visible(store.feed() != Some(Feed::Saved));
         let empty = store.posts().n_items() == 0;
@@ -437,7 +439,8 @@ fn footer_widget(footer: &FooterObject, store: &FeedStore) -> gtk::Widget {
         }
     );
     update(footer);
-    footer.connect_state_notify(update);
+    let handler = footer.connect_state_notify(update);
+    super::attach_watch(&stack, footer, handler);
     stack.upcast()
 }
 

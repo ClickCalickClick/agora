@@ -65,7 +65,7 @@
     <content_attribute id="money-purchasing">none</content_attribute>
   </content_rating>
   <releases>
-    <release version="0.1.0" date="2026-11-01">
+    <release version="0.1.0" date="2026-10-31">
       <description>
         <p>First reading slice (sample data only).</p>
       </description>

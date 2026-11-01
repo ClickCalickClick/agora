@@ -23,6 +23,8 @@ mod imp {
         pub focus: RefCell<Option<CommentId>>,
         pub sort: Cell<CommentSort>,
         pub generation: Cell<u64>,
+        /// Absolute depth shown at level 0 (non-zero for a focused branch).
+        pub base_depth: Cell<u32>,
         pub rows: RefCell<Option<gio::ListStore>>,
         /// The post, once loaded (or the row it was opened from).
         #[property(get, nullable)]
@@ -54,28 +56,52 @@ glib::wrapper! {
     pub struct ThreadStore(ObjectSubclass<imp::ThreadStore>);
 }
 
-/// Flattens comment nodes into rows, applying the visual depth limit.
-pub fn flatten(nodes: Vec<CommentNode>, out: &mut Vec<CommentObject>) {
+/// Depth of the shallowest node, which the UI shows at level 0. A focused
+/// load ("Continue this thread") starts at the focused comment's depth.
+pub fn base_depth(nodes: &[CommentNode]) -> u32 {
+    nodes
+        .iter()
+        .map(|n| match n {
+            CommentNode::Comment { comment, .. } => comment.depth,
+            CommentNode::More { depth, .. } | CommentNode::Continue { depth, .. } => *depth,
+        })
+        .min()
+        .unwrap_or(0)
+}
+
+/// Flattens comment nodes into rows indented relative to `base`, applying the
+/// visual depth limit.
+pub fn flatten(nodes: Vec<CommentNode>, base: u32, out: &mut Vec<CommentObject>) {
     for node in nodes {
         match node {
             CommentNode::Comment { comment, replies } => {
-                if comment.depth >= MAX_VISUAL_DEPTH {
+                let depth = comment.depth.saturating_sub(base);
+                if depth >= MAX_VISUAL_DEPTH {
                     if let Some(parent) = comment.parent.clone() {
                         out.push(CommentObject::continue_thread(MAX_VISUAL_DEPTH, parent));
                     }
                     // One "continue" row stands for all siblings at this level.
                     return;
                 }
-                out.push(CommentObject::comment(comment));
-                flatten(replies, out);
+                let row = CommentObject::comment(comment);
+                row.set_depth(depth);
+                out.push(row);
+                flatten(replies, base, out);
             }
             CommentNode::More {
                 depth, count, token, ..
             } => {
-                out.push(CommentObject::more(depth.min(MAX_VISUAL_DEPTH), count, token));
+                out.push(CommentObject::more(
+                    depth.saturating_sub(base).min(MAX_VISUAL_DEPTH),
+                    count,
+                    token,
+                ));
             }
             CommentNode::Continue { parent, depth } => {
-                out.push(CommentObject::continue_thread(depth.min(MAX_VISUAL_DEPTH), parent));
+                out.push(CommentObject::continue_thread(
+                    depth.saturating_sub(base).min(MAX_VISUAL_DEPTH),
+                    parent,
+                ));
             }
         }
     }
@@ -204,8 +230,10 @@ impl ThreadStore {
                             obj.notify_post();
                         }
                     }
+                    let base = base_depth(&nodes);
+                    obj.imp().base_depth.set(base);
                     let mut rows = Vec::new();
-                    flatten(nodes, &mut rows);
+                    flatten(nodes, base, &mut rows);
                     obj.rows().extend_from_slice(&rows);
                     obj.set_state(LoadState::Done);
                 }
@@ -290,12 +318,13 @@ impl ThreadStore {
             return;
         };
         row.set_loading(true);
+        let sort = self.imp().sort.get();
         let backend = self.ctx().backend.clone();
         let generation = self.imp().generation.get();
         let weak = self.downgrade();
         let row = row.clone();
         glib::spawn_future_local(async move {
-            let result = backend.more_comments(post, token).await;
+            let result = backend.more_comments(post, sort, token).await;
             let Some(obj) = weak.upgrade() else { return };
             row.set_loading(false);
             if obj.imp().generation.get() != generation {
@@ -306,7 +335,7 @@ impl ThreadStore {
                     let rows = obj.rows();
                     let Some(index) = rows.find(&row) else { return };
                     let mut new_rows = Vec::new();
-                    flatten(nodes, &mut new_rows);
+                    flatten(nodes, obj.imp().base_depth.get(), &mut new_rows);
                     for r in &new_rows {
                         r.mark_fade_in();
                     }
@@ -451,6 +480,13 @@ mod tests {
             store.focus_comment(cont.continue_parent().unwrap());
             run_until(|| store.state() == LoadState::Done && store.rows().n_items() > 0);
             assert!(store.focused());
+            assert_eq!(rows(&store)[0].depth(), 0, "focused root sits at level 0");
+            assert!(
+                rows(&store)
+                    .iter()
+                    .all(|r| r.continue_parent() != cont.continue_parent()),
+                "no row continues the root itself"
+            );
             let first = rows(&store)[0].clone();
             assert_eq!(first.with(|c| c.id.clone()), cont.continue_parent());
             store.unfocus();

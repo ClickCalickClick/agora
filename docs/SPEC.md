@@ -185,7 +185,7 @@ agora/
 ├── meson.build
 ├── build-aux/
 │   ├── io.github.ClickCalickClick.Agora.Devel.json   # Flatpak manifest
-│   └── gen-resources.py      # writes the gresource XML and po/POTFILES (§19)
+│   └── gen-potfiles.py       # writes po/POTFILES.in (§19); build.rs compiles resources
 ├── data/
 │   ├── *.desktop.in.in, *.metainfo.xml.in.in, *.gschema.xml.in
 │   ├── *.search-provider.ini
@@ -504,7 +504,7 @@ The AST (`agora-markdown`) has these node types: blocks `Paragraph`, `Heading(le
 - Comments render as a flattened `GtkListView` of rows with a depth value, which keeps virtualization for threads with thousands of comments.
 - Each depth level is indented and draws a **thread line**: 2 px, neutral gray, which turns the **accent color on hover or keyboard focus** along that comment's whole branch.
 - Clicking a thread line or the comment header collapses the branch. The collapse is animated by fading the hidden rows (opacity), never by animating row height, because rows are recycled; it respects reduced animation. Collapsed state shows "author · N replies".
-- Max visual depth 8; deeper replies show "Continue thread →" which pushes a new page rooted at that comment.
+- Max visual depth 8; deeper replies show "Continue this thread →", which reloads the post view rooted at that comment, indented from level 0, with a "View All Comments" button (and Back, `h`) to return. (Slice 1 chose an in-place reload over a pushed page so the three-pane layout keeps one post view.)
 - **Load more**: "N more replies" rows load inline through the `more_comments` operation (§4.5) and replace themselves with the results.
 - OP's comments get an "OP" badge; the user's own comments get a "You" badge.
 
@@ -752,7 +752,7 @@ Disclaimers lower the risk but do not guarantee that no one is held responsible.
   - `gitleaks` secrets scan
   - Flatpak build of the Devel manifest
   - `appstreamcli validate`, `desktop-file-validate`, `glib-compile-schemas --strict`
-- **Generated lists:** Meson has no glob function, so `build-aux/gen-resources.py` scans `data/resources/` and `crates/agora-app/src/` and writes the gresource XML and `po/POTFILES`. It runs from a Meson `custom_target` whose `depend_files` include the scanned directories; Blueprint files are compiled with `blueprint-compiler batch-compile` into a target that `gnome.compile_resources` depends on. Adding a new file needs a `meson setup --reconfigure`, which CI always does from scratch.
+- **Generated lists:** `crates/agora-app/build.rs` compiles every Blueprint file under `data/resources/ui/`, writes the gresource XML for the compiled UI files, stylesheets and icons, and embeds the bundle in the binary, so plain `cargo build`, `cargo test` and `cargo clippy` work without Meson. Meson only calls Cargo with the app ID, profile and install paths, then installs the binary and data files. `build-aux/gen-potfiles.py` writes `po/POTFILES.in`; the Meson test `potfiles` fails when it is stale. (Changed in slice 1 from a Meson `gen-resources.py` target.)
 - Rust edition 2024; MSRV pinned to the Rust SDK extension of the target runtime.
 
 ---

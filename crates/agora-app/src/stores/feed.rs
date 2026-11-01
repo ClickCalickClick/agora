@@ -68,6 +68,16 @@ impl FeedStore {
         imp.sort_key.replace(sort.key().into());
         imp.top_range.replace(range.key().into());
         imp.posts.replace(Some(gio::ListStore::new::<PostObject>()));
+        // A feed chosen before sign-in is confirmed loads once it is.
+        ctx.session.connect_state_notify(glib::clone!(
+            #[weak]
+            obj,
+            move |session| {
+                if session.can_request() && obj.posts().n_items() == 0 && obj.state() == LoadState::Idle {
+                    obj.load_more();
+                }
+            }
+        ));
         imp.ctx.replace(Some(ctx));
         obj
     }
@@ -159,6 +169,7 @@ impl FeedStore {
             after: imp.after.borrow().clone(),
         };
         let generation = imp.generation.get();
+        tracing::debug!(feed = ?request.feed, after = ?request.after, "listing");
         self.set_state(LoadState::Loading);
         let backend = ctx.backend.clone();
         let weak = self.downgrade();

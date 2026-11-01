@@ -448,7 +448,7 @@ impl Backend for MockBackend {
         })
     }
 
-    fn more_comments(&self, post: PostId, token: MoreToken) -> BackendFuture<Vec<CommentNode>> {
+    fn more_comments(&self, post: PostId, sort: CommentSort, token: MoreToken) -> BackendFuture<Vec<CommentNode>> {
         self.op("more_comments", move |s| {
             let mut parts = token.as_str().split('|');
             let (Some(p), Some(parent), Some(start)) = (parts.next(), parts.next(), parts.next()) else {
@@ -466,8 +466,11 @@ impl Backend for MockBackend {
                     .ok_or(AgoraError::NotFound)?
                     .replies
             };
+            // The token's index is into the sorted siblings, as `cut` saw them.
+            let mut siblings = siblings.to_vec();
+            sort_trees(&mut siblings, sort);
             let base = siblings.first().map_or(0, |t| t.comment.depth);
-            Ok(cut(siblings, &post, base.saturating_sub(2), start))
+            Ok(cut(&siblings, &post, base.saturating_sub(2), start))
         })
     }
 
@@ -742,6 +745,15 @@ impl Backend for MockBackend {
                     t.comment.body = Body::Markdown(String::new());
                 }
             }
+            Ok(())
+        })
+    }
+
+    fn sign_out(&self) -> BackendFuture<()> {
+        let events = self.events.0.clone();
+        self.op("whoami", move |s| {
+            s.signed_in = false;
+            let _ = events.try_send(BackendEvent::SignedOut);
             Ok(())
         })
     }

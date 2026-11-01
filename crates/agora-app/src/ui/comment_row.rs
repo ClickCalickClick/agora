@@ -25,6 +25,8 @@ mod imp {
         pub row: RefCell<Option<CommentObject>>,
         pub handlers: RefCell<Vec<glib::SignalHandlerId>>,
         pub thread: RefCell<Option<ThreadStore>>,
+        /// Up, score, down and save controls of the current action bar.
+        pub actions: RefCell<Option<(gtk::ToggleButton, gtk::Label, gtk::ToggleButton, gtk::ToggleButton)>>,
     }
 
     #[glib::object_subclass]
@@ -40,6 +42,7 @@ mod imp {
             let obj = self.obj();
             let root = gtk::Box::builder().margin_start(6).margin_end(6).build();
             self.lines.add_css_class("thread-lines");
+            self.lines.set_hexpand(false);
             root.append(&self.lines);
             self.content.set_orientation(gtk::Orientation::Vertical);
             self.content.set_spacing(4);
@@ -150,7 +153,17 @@ impl CommentRow {
             self,
             move |r| this.update_lines(r)
         ))];
-        for prop in ["collapsed", "loading", "vote", "score", "saved"] {
+        for prop in ["vote", "score", "saved"] {
+            handlers.push(row.connect_notify_local(
+                Some(prop),
+                glib::clone!(
+                    #[weak(rename_to = this)]
+                    self,
+                    move |r, _| this.update_actions(r)
+                ),
+            ));
+        }
+        for prop in ["collapsed", "loading"] {
             let (writes, on_link, op, me) = (writes.clone(), on_link.clone(), op.map(str::to_owned), me.to_owned());
             handlers.push(row.connect_notify_local(
                 Some(prop),
@@ -183,12 +196,13 @@ impl CommentRow {
     /// Disconnects from the bound row.
     pub fn unbind(&self) {
         let imp = self.imp();
+        let lit = imp.row.borrow().as_ref().is_some_and(|r| r.highlight_line() >= 0);
+        if lit {
+            self.highlight(false);
+        }
         if let Some(row) = imp.row.take() {
             for h in imp.handlers.take() {
                 row.disconnect(h);
-            }
-            if row.highlight_line() >= 0 {
-                self.highlight(false);
             }
         }
     }
@@ -217,7 +231,6 @@ impl CommentRow {
             let line = gtk::Box::builder()
                 .width_request(2)
                 .halign(gtk::Align::Center)
-                .hexpand(true)
                 .css_classes(["thread-line"])
                 .build();
             slot.append(&line);
@@ -280,6 +293,7 @@ impl CommentRow {
 
     fn build_content(&self, row: &CommentObject, writes: &Writes, on_link: &LinkHandler, op: Option<&str>, me: &str) {
         let content = &self.imp().content;
+        self.imp().actions.replace(None);
         while let Some(child) = content.first_child() {
             content.remove(&child);
         }
@@ -402,49 +416,20 @@ impl CommentRow {
 
     fn actions(&self, row: &CommentObject, writes: &Writes) -> gtk::Widget {
         let bar = gtk::Box::builder().spacing(2).css_classes(["comment-actions"]).build();
-        let make = |icon: &str, tooltip: String, active: bool, class: &str| {
+        let make = |icon: &str, class: &str| {
             gtk::ToggleButton::builder()
                 .icon_name(icon)
-                .tooltip_text(tooltip)
-                .active(active)
                 .css_classes(["flat", "circular", class])
                 .build()
         };
-        let up = make("agora-upvote-symbolic", gettext("Upvote"), row.vote() > 0, "upvote");
-        let down = make(
-            "agora-downvote-symbolic",
-            gettext("Downvote"),
-            row.vote() < 0,
-            "downvote",
-        );
+        let up = make("agora-upvote-symbolic", "upvote");
+        up.set_tooltip_text(Some(&gettext("Upvote")));
+        let down = make("agora-downvote-symbolic", "downvote");
+        down.set_tooltip_text(Some(&gettext("Downvote")));
         let score = gtk::Label::builder()
-            .label(if row.score_hidden() {
-                "•".to_string()
-            } else {
-                util::compact(row.score())
-            })
             .css_classes(["caption", "numeric", "score"])
             .build();
-        if row.vote() > 0 {
-            score.add_css_class("upvoted");
-        } else if row.vote() < 0 {
-            score.add_css_class("downvoted");
-        }
-        score.update_property(&[gtk::accessible::Property::Label(&if row.score_hidden() {
-            gettext("Score hidden")
-        } else {
-            util::spoken_points(row.score())
-        })]);
-        let save = make(
-            "bookmark-new-symbolic",
-            if row.saved() {
-                gettext("Unsave")
-            } else {
-                gettext("Save")
-            },
-            row.saved(),
-            "save",
-        );
+        let save = make("bookmark-new-symbolic", "save");
         let w: Rc<Writes> = Rc::new(writes.clone());
         for (button, action) in [(&up, "up"), (&down, "down"), (&save, "save")] {
             let (w, r) = (w.clone(), row.clone());
@@ -458,7 +443,41 @@ impl CommentRow {
         bar.append(&score);
         bar.append(&down);
         bar.append(&save);
+        self.imp().actions.replace(Some((up, score, down, save)));
+        self.update_actions(row);
         bar.upcast()
+    }
+
+    /// Updates the action bar in place, so a pressed button keeps focus.
+    fn update_actions(&self, row: &CommentObject) {
+        let Some((up, score, down, save)) = self.imp().actions.borrow().clone() else {
+            return;
+        };
+        up.set_active(row.vote() > 0);
+        down.set_active(row.vote() < 0);
+        save.set_active(row.saved());
+        save.set_tooltip_text(Some(&if row.saved() {
+            gettext("Unsave")
+        } else {
+            gettext("Save")
+        }));
+        score.set_label(&if row.score_hidden() {
+            "•".to_string()
+        } else {
+            util::compact(row.score())
+        });
+        score.remove_css_class("upvoted");
+        score.remove_css_class("downvoted");
+        if row.vote() > 0 {
+            score.add_css_class("upvoted");
+        } else if row.vote() < 0 {
+            score.add_css_class("downvoted");
+        }
+        score.update_property(&[gtk::accessible::Property::Label(&if row.score_hidden() {
+            gettext("Score hidden")
+        } else {
+            util::spoken_points(row.score())
+        })]);
     }
 }
 

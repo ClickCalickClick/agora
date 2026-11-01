@@ -16,7 +16,8 @@ use crate::util;
 mod imp {
     use super::*;
 
-    #[derive(Default, gtk::CompositeTemplate)]
+    #[derive(Default, gtk::CompositeTemplate, glib::Properties)]
+    #[properties(wrapper_type = super::AgoraPostPage)]
     #[template(resource = "/io/github/ClickCalickClick/Agora/ui/post_page.ui")]
     pub struct AgoraPostPage {
         #[template_child]
@@ -34,7 +35,9 @@ mod imp {
         pub header: OnceCell<gio::ListStore>,
         pub focus_note: OnceCell<gio::ListStore>,
         pub footer: OnceCell<FooterObject>,
-        pub sort_action: OnceCell<gio::SimpleAction>,
+        /// `post.sort` state: a comment sort key.
+        #[property(get, set = Self::set_sort_target)]
+        pub sort_target: std::cell::RefCell<String>,
         pub last_state: std::cell::Cell<LoadState>,
     }
 
@@ -47,6 +50,9 @@ mod imp {
         fn class_init(klass: &mut Self::Class) {
             klass.bind_template();
             klass.bind_template_instance_callbacks();
+            klass.install_property_action("post.sort", "sort-target");
+            klass.install_action("post.copy-link", None, |page, _, _| page.copy_link());
+            klass.install_action("post.open-in-browser", None, |page, _, _| page.open_in_browser());
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -54,7 +60,20 @@ mod imp {
         }
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for AgoraPostPage {}
+
+    impl AgoraPostPage {
+        fn set_sort_target(&self, key: String) {
+            if *self.sort_target.borrow() == key {
+                return;
+            }
+            self.sort_target.replace(key.clone());
+            if let (Some(sort), Some(store)) = (CommentSort::from_key(&key), self.store.get()) {
+                store.set_sort(sort);
+            }
+        }
+    }
     impl WidgetImpl for AgoraPostPage {}
     impl NavigationPageImpl for AgoraPostPage {}
 }
@@ -102,45 +121,6 @@ impl AgoraPostPage {
         imp.list_view
             .set_factory(Some(&self.factory(ctx, store, writes, on_link)));
 
-        let group = gio::SimpleActionGroup::new();
-        let sort =
-            gio::SimpleAction::new_stateful("sort", Some(glib::VariantTy::STRING), &store.sort_key().to_variant());
-        sort.connect_activate(glib::clone!(
-            #[weak]
-            store,
-            move |action, param| {
-                let Some(key) = param.and_then(|p| p.get::<String>()) else {
-                    return;
-                };
-                if let Some(sort) = CommentSort::from_key(&key) {
-                    action.set_state(&key.to_variant());
-                    store.set_sort(sort);
-                }
-            }
-        ));
-        group.add_action(&sort);
-        let copy = gio::SimpleAction::new("copy-link", None);
-        copy.connect_activate(glib::clone!(
-            #[weak(rename_to = page)]
-            self,
-            move |_, _| page.copy_link()
-        ));
-        group.add_action(&copy);
-        let open = gio::SimpleAction::new("open-in-browser", None);
-        open.connect_activate(glib::clone!(
-            #[weak(rename_to = page)]
-            self,
-            move |_, _| {
-                if let Some(post) = page.imp().store.get().and_then(|s| s.post()) {
-                    let url = post.with(|p| util::reddit_url(&p.permalink));
-                    let root = page.root().and_downcast::<gtk::Window>();
-                    gtk::UriLauncher::new(&url).launch(root.as_ref(), gio::Cancellable::NONE, |_| {});
-                }
-            }
-        ));
-        group.add_action(&open);
-        self.insert_action_group("post", Some(&group));
-
         for prop in ["state", "error", "post", "focused", "sort-key"] {
             store.connect_notify_local(
                 Some(prop),
@@ -158,7 +138,6 @@ impl AgoraPostPage {
         let _ = imp.header.set(header);
         let _ = imp.focus_note.set(focus_note);
         let _ = imp.footer.set(footer);
-        let _ = imp.sort_action.set(sort);
         self.update();
     }
 
@@ -218,6 +197,8 @@ impl AgoraPostPage {
                 w.unbind();
             } else if let Some(w) = item.child().and_downcast::<PostHeader>() {
                 w.unbind();
+            } else if let Some(child) = item.child() {
+                super::release_watch(&child);
             }
         });
         factory
@@ -250,10 +231,10 @@ impl AgoraPostPage {
             let list = imp.list_view.get();
             glib::idle_add_local_once(move || list.scroll_to(0, gtk::ListScrollFlags::NONE, None));
         }
-        let _ = imp
-            .sort_action
-            .get()
-            .map(|a| a.set_state(&store.sort_key().to_variant()));
+        let key = store.sort_key();
+        if imp.sort_target.replace(key.clone()) != key {
+            self.notify_sort_target();
+        }
         let has_post = post.is_some();
         imp.sort_button.set_sensitive(has_post);
         imp.overflow_button.set_sensitive(has_post);
@@ -263,7 +244,7 @@ impl AgoraPostPage {
             self.set_title(&gettext("Post"));
         }
         imp.stack
-            .set_visible_child_name(if has_post || store.state() == LoadState::Loading {
+            .set_visible_child_name(if has_post || store.state() != LoadState::Idle {
                 "content"
             } else {
                 "empty"
@@ -280,6 +261,14 @@ impl AgoraPostPage {
                     store.focus_comment(id);
                 }
             }
+        }
+    }
+
+    fn open_in_browser(&self) {
+        if let Some(post) = self.imp().store.get().and_then(|s| s.post()) {
+            let url = post.with(|p| util::reddit_url(&p.permalink));
+            let root = self.root().and_downcast::<gtk::Window>();
+            gtk::UriLauncher::new(&url).launch(root.as_ref(), gio::Cancellable::NONE, |_| {});
         }
     }
 
@@ -457,6 +446,7 @@ fn comments_footer(footer: &FooterObject, store: &ThreadStore) -> gtk::Widget {
         }
     );
     update(footer);
-    footer.connect_state_notify(update);
+    let handler = footer.connect_state_notify(update);
+    super::attach_watch(&stack, footer, handler);
     stack.upcast()
 }

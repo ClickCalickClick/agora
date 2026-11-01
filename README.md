@@ -84,4 +84,4 @@ This project follows the [GNOME Code of Conduct](https://conduct.gnome.org/).
 
 ## License
 
-GPL-3.0-or-later. See `LICENSE` (added with the first code commit).
+GPL-3.0-or-later. See `LICENSE`.

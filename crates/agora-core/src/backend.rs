@@ -74,7 +74,8 @@ pub struct SearchRequest {
 /// is no separate read-back.
 pub trait Backend {
     /// Events outside single operations (sign-in, expiry, pushback). Every call
-    /// returns a receiver of the same channel.
+    /// returns a receiver of the same channel, and each event goes to one
+    /// receiver only: the app has a single listener, `SessionStore`.
     fn events(&self) -> async_channel::Receiver<BackendEvent>;
 
     // Reads.
@@ -85,8 +86,9 @@ pub trait Backend {
     fn listing(&self, request: ListingRequest) -> BackendFuture<Listing<Post>>;
     /// A post and its first comments.
     fn post_with_comments(&self, request: ThreadRequest) -> BackendFuture<(Post, Vec<CommentNode>)>;
-    /// The comments behind one "N more replies" row.
-    fn more_comments(&self, post: PostId, token: MoreToken) -> BackendFuture<Vec<CommentNode>>;
+    /// The comments behind one "N more replies" row, in the sort the thread
+    /// was loaded with (Reddit's partial takes the sort too).
+    fn more_comments(&self, post: PostId, sort: CommentSort, token: MoreToken) -> BackendFuture<Vec<CommentNode>>;
     /// A subreddit's header, description and rules.
     fn subreddit_info(&self, name: SubredditName) -> BackendFuture<Subreddit>;
     /// The user's subscriptions.
@@ -97,6 +99,10 @@ pub trait Backend {
     fn notifications(&self, after: Option<Cursor>) -> BackendFuture<Listing<Notification>>;
     /// One page of search results.
     fn search(&self, request: SearchRequest) -> BackendFuture<SearchResults>;
+
+    /// Signs out: clears the web session's data (SPEC §4.4) and emits
+    /// [`BackendEvent::SignedOut`].
+    fn sign_out(&self) -> BackendFuture<()>;
 
     // Writes.
 

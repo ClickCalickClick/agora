@@ -77,7 +77,7 @@ fn long_thread_has_more_and_continue_rows() {
     });
     assert!(!more.is_empty(), "expected more-replies rows");
     assert!(cont > 0, "expected continue-thread rows");
-    let loaded = block_on(b.more_comments(PostId::new("t3_showcase7"), more[0].clone())).unwrap();
+    let loaded = block_on(b.more_comments(PostId::new("t3_showcase7"), CommentSort::Best, more[0].clone())).unwrap();
     assert!(!loaded.is_empty());
 }
 
@@ -158,4 +158,36 @@ fn sample_data_is_deterministic() {
     let a = first_thread(&MockBackend::new(), "t3_gen3");
     let b = first_thread(&MockBackend::new(), "t3_gen3");
     assert_eq!(a, b);
+}
+
+#[test]
+fn load_more_never_repeats_comments() {
+    for sort in CommentSort::ALL {
+        let b = MockBackend::new();
+        let post = PostId::new("t3_showcase7");
+        let nodes = block_on(b.post_with_comments(ThreadRequest {
+            post: post.clone(),
+            sort,
+            focus: None,
+        }))
+        .unwrap()
+        .1;
+        let mut seen = std::collections::HashSet::new();
+        let mut more = Vec::new();
+        walk(&nodes, &mut |n| match n {
+            CommentNode::Comment { comment, .. } => {
+                seen.insert(comment.id.clone());
+            }
+            CommentNode::More { token, .. } => more.push(token.clone()),
+            CommentNode::Continue { .. } => {}
+        });
+        for token in more {
+            let loaded = block_on(b.more_comments(post.clone(), sort, token)).unwrap();
+            walk(&loaded, &mut |n| {
+                if let CommentNode::Comment { comment, .. } = n {
+                    assert!(seen.insert(comment.id.clone()), "{sort:?}: {} loaded twice", comment.id);
+                }
+            });
+        }
+    }
 }
