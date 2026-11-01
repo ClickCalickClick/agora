@@ -1,0 +1,35 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AgoraSidebar: Adw.Bin {
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      [end]
+      Gtk.MenuButton {
+        primary: true;
+        icon-name: "open-menu-symbolic";
+        tooltip-text: _("Main Menu");
+        menu-model: primary_menu;
+      }
+    }
+
+    content: Adw.Sidebar sidebar {
+      activated => $on_activated() swapped;
+    };
+  };
+}
+
+menu primary_menu {
+  section {
+    item {
+      label: _("_Keyboard Shortcuts");
+      action: "app.shortcuts";
+    }
+
+    item {
+      label: _("_About Agora");
+      action: "app.about";
+    }
+  }
+}

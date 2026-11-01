@@ -1,0 +1,17 @@
+[package]
+name = "agora-markdown"
+description = "Reddit post and comment bodies (HTML or Reddit-flavoured Markdown) to one display-free document AST"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+html5ever = "0.39"
+markup5ever_rcdom = "0.39.0"
+pulldown-cmark = { version = "0.13", default-features = false }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

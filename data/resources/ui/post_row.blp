@@ -1,0 +1,82 @@
+using Gtk 4.0;
+
+template $AgoraPostRow: Gtk.Box {
+  spacing: 12;
+  margin-top: 10;
+  margin-bottom: 10;
+  margin-start: 6;
+  margin-end: 6;
+
+  Gtk.Box {
+    orientation: vertical;
+    spacing: 4;
+    hexpand: true;
+
+    Gtk.Label title {
+      xalign: 0;
+      wrap: true;
+      wrap-mode: word_char;
+      lines: 3;
+      ellipsize: end;
+      natural-wrap-mode: word;
+
+      styles [
+        "heading",
+        "post-title",
+      ]
+    }
+
+    Gtk.Label meta {
+      xalign: 0;
+      ellipsize: end;
+
+      styles [
+        "caption",
+        "dim-label",
+      ]
+    }
+
+    Gtk.Box badges {
+      spacing: 4;
+      visible: false;
+    }
+  }
+
+  Gtk.Box trailing {
+    orientation: vertical;
+    valign: center;
+    spacing: 2;
+
+    Gtk.Label score {
+      xalign: 1;
+
+      styles [
+        "caption-heading",
+        "numeric",
+        "score",
+      ]
+    }
+
+    Gtk.Box {
+      spacing: 4;
+      halign: end;
+
+      Gtk.Image {
+        icon-name: "agora-comments-symbolic";
+        pixel-size: 12;
+
+        styles [
+          "dim-label",
+        ]
+      }
+
+      Gtk.Label comments {
+        styles [
+          "caption",
+          "numeric",
+          "dim-label",
+        ]
+      }
+    }
+  }
+}

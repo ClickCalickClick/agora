@@ -1,0 +1,59 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AgoraWindow: Adw.ApplicationWindow {
+  width-request: 360;
+  height-request: 360;
+  title: _("Agora");
+
+  Adw.Breakpoint {
+    condition ("max-width: 1099sp")
+
+    setters {
+      outer.collapsed: true;
+    }
+  }
+
+  Adw.Breakpoint {
+    condition ("max-width: 699sp")
+
+    setters {
+      outer.collapsed: true;
+      inner.collapsed: true;
+    }
+  }
+
+  content: Adw.ToastOverlay toasts {
+    Gtk.Box {
+      orientation: vertical;
+
+      Adw.Banner banner {
+        button-clicked => $on_banner_button() swapped;
+      }
+
+      Adw.OverlaySplitView outer {
+        vexpand: true;
+        min-sidebar-width: 220;
+        max-sidebar-width: 280;
+        sidebar-width-fraction: 0.2;
+
+        sidebar: Adw.NavigationPage {
+          title: _("Agora");
+          tag: "sidebar";
+
+          child: $AgoraSidebar sidebar {};
+        };
+
+        content: Adw.NavigationSplitView inner {
+          min-sidebar-width: 340;
+          max-sidebar-width: 460;
+          sidebar-width-fraction: 0.4;
+
+          sidebar: $AgoraFeedPage feed_page {};
+
+          content: $AgoraPostPage post_page {};
+        };
+      }
+    }
+  };
+}

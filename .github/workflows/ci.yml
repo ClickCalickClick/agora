@@ -1,0 +1,113 @@
+# CI per SPEC §19. The checks run inside the GNOME 51 SDK (the target
+# runtime); the container provides flatpak and the SDK.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SDK_BRANCH: "51"
+
+jobs:
+  checks:
+    name: fmt, clippy, tests, data validation
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust SDK extension and Xvfb
+        run: |
+          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          # The rust-stable branch must match the freedesktop base of the GNOME SDK.
+          fdo=$(flatpak info -m "org.gnome.Sdk//$SDK_BRANCH" \
+            | awk '/^\[Extension org.freedesktop.Sdk.Extension\]/{f=1; next} /^\[/{f=0} f && /^versions?=/{sub(/^versions?=/, ""); split($0, v, ";"); print v[1]; exit}')
+          echo "freedesktop SDK branch: $fdo"
+          flatpak install -y --noninteractive flathub "org.freedesktop.Sdk.Extension.rust-stable//$fdo"
+          dnf install -y xorg-x11-server-Xvfb xorg-x11-xauth
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .cargo-home/registry
+            .cargo-home/git
+            _build/cargo-target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: WebKitGTK 6.0 is in the SDK
+        run: build-aux/sdk-run.sh pkg-config --modversion webkitgtk-6.0
+
+      - name: cargo fmt --check
+        run: build-aux/sdk-run.sh cargo fmt --all --check
+
+      - name: cargo clippy
+        run: build-aux/sdk-run.sh cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Meson build
+        run: |
+          build-aux/sdk-run.sh meson setup _build -Dprofile=development
+          build-aux/sdk-run.sh meson compile -C _build
+
+      - name: appstreamcli, desktop-file-validate, glib-compile-schemas --strict
+        run: |
+          build-aux/sdk-run.sh appstreamcli validate --no-net --explain _build/data/io.github.ClickCalickClick.Agora.Devel.metainfo.xml
+          build-aux/sdk-run.sh desktop-file-validate _build/data/io.github.ClickCalickClick.Agora.Devel.desktop
+          build-aux/sdk-run.sh glib-compile-schemas --strict --dry-run _build/data
+
+      - name: cargo test --workspace (under xvfb-run) and Meson tests
+        run: xvfb-run -a build-aux/sdk-run.sh meson test -C _build --print-errorlogs
+
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  gitleaks:
+    name: gitleaks secrets scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  flatpak:
+    name: Flatpak build (Devel manifest)
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate cargo-sources.json from Cargo.lock
+        run: |
+          dnf install -y python3-aiohttp python3-tomlkit python3-toml
+          curl -fsSL -o /tmp/flatpak-cargo-generator.py \
+            https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
+          python3 /tmp/flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: agora-devel.flatpak
+          manifest-path: build-aux/io.github.ClickCalickClick.Agora.Devel.json
+          cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
+          # Agora publishes no bundles (SPEC §18).
+          upload-artifact: false

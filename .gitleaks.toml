@@ -1,0 +1,15 @@
+# gitleaks configuration (SPEC §18.1 rule 5, §19). Extends the default rules.
+title = "Agora gitleaks config"
+
+[extend]
+useDefault = true
+
+# Scrubbed fixtures replace tokens with the literal placeholder REDACTED
+# (crates/agora-reddit-web/tests/fixtures/). Only that exact placeholder is
+# allowed; any other secret-shaped value in the fixtures is still reported.
+[allowlist]
+description = "REDACTED placeholders in scrubbed fixtures"
+regexTarget = "match"
+regexes = [
+    '''REDACTED''',
+]

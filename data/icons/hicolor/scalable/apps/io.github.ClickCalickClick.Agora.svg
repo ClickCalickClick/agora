@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Agora app icon. Temporary placeholder art: slice 6 redesigns it (SPEC §2.1).
+     A sand portico; the deep teal space between its columns is a speech bubble. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Roof -->
+  <path fill="#c9b48c" d="M64 10 116 36v6H12v-6z"/>
+  <path fill="#e8dcc4" d="M64 17 101 36H27z"/>
+  <!-- Facade -->
+  <rect x="14" y="40" width="100" height="56" rx="4" fill="#e8dcc4"/>
+  <rect x="14" y="40" width="100" height="6" rx="2" fill="#d8c7a4"/>
+  <!-- Speech bubble opening -->
+  <path fill="#1f4e4f" d="M36 52h56a12 12 0 0 1 12 12v12a12 12 0 0 1-12 12H52l-18 10 4-10h-2a12 12 0 0 1-12-12V64a12 12 0 0 1 12-12z"/>
+  <path fill="#2b6463" d="M36 52h56a12 12 0 0 1 12 12v2H24v-2a12 12 0 0 1 12-12z"/>
+  <!-- Columns standing in the opening -->
+  <g fill="#f6efe1">
+    <rect x="41" y="52" width="9" height="36"/>
+    <rect x="59.5" y="52" width="9" height="36"/>
+    <rect x="78" y="52" width="9" height="36"/>
+  </g>
+  <!-- Steps -->
+  <rect x="10" y="96" width="108" height="8" rx="2" fill="#d8c7a4"/>
+  <rect x="6" y="104" width="116" height="10" rx="3" fill="#c9b48c"/>
+  <rect x="6" y="110" width="116" height="4" rx="2" fill="#a8916a"/>
+</svg>

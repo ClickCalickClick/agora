@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GSettings schema for Agora (SPEC §13). The Devel build installs the same
+  schema ID. crates/agora-app/build.rs copies this file verbatim for runs from
+  the source tree, so it must stay a valid schema with no @placeholders@.
+-->
+<schemalist gettext-domain="agora">
+  <schema id="io.github.ClickCalickClick.Agora" path="/io/github/ClickCalickClick/Agora/">
+
+    <!-- Window state -->
+    <key name="window-width" type="i">
+      <range min="360" max="2147483647"/>
+      <default>1100</default>
+      <summary>Window width</summary>
+      <description>Width of the main window in pixels.</description>
+    </key>
+    <key name="window-height" type="i">
+      <range min="360" max="2147483647"/>
+      <default>720</default>
+      <summary>Window height</summary>
+      <description>Height of the main window in pixels.</description>
+    </key>
+    <key name="window-maximized" type="b">
+      <default>false</default>
+      <summary>Window maximized</summary>
+      <description>Whether the main window is maximized.</description>
+    </key>
+    <key name="risk-acknowledged" type="b">
+      <default>false</default>
+      <summary>Risk acknowledged</summary>
+      <description>Whether the disclaimer on the Welcome page has been acknowledged.</description>
+    </key>
+
+    <!-- General -->
+    <key name="default-feed" type="s">
+      <choices>
+        <choice value="home"/>
+        <choice value="popular"/>
+      </choices>
+      <default>"home"</default>
+      <summary>Default feed</summary>
+      <description>The feed shown when Agora starts.</description>
+    </key>
+    <key name="default-sort" type="s">
+      <choices>
+        <choice value="best"/>
+        <choice value="hot"/>
+        <choice value="new"/>
+        <choice value="top"/>
+        <choice value="rising"/>
+      </choices>
+      <default>"best"</default>
+      <summary>Default post sort</summary>
+      <description>How posts in feeds and communities are sorted by default.</description>
+    </key>
+    <key name="default-top-range" type="s">
+      <choices>
+        <choice value="hour"/>
+        <choice value="day"/>
+        <choice value="week"/>
+        <choice value="month"/>
+        <choice value="year"/>
+        <choice value="all"/>
+      </choices>
+      <default>"day"</default>
+      <summary>Default time range for top posts</summary>
+      <description>The time range used when posts are sorted by top.</description>
+    </key>
+    <key name="default-comment-sort" type="s">
+      <choices>
+        <choice value="best"/>
+        <choice value="top"/>
+        <choice value="new"/>
+        <choice value="controversial"/>
+        <choice value="old"/>
+        <choice value="qa"/>
+      </choices>
+      <default>"best"</default>
+      <summary>Default comment sort</summary>
+      <description>How comments are sorted by default.</description>
+    </key>
+    <key name="open-links-in-agora" type="b">
+      <default>true</default>
+      <summary>Open Reddit links in Agora</summary>
+      <description>Whether links to Reddit pages open inside Agora instead of the web browser.</description>
+    </key>
+    <key name="mark-read-on-open" type="b">
+      <default>true</default>
+      <summary>Mark posts read on open</summary>
+      <description>Whether opening a post marks it as read.</description>
+    </key>
+
+    <!-- Appearance -->
+    <key name="large-cards" type="b">
+      <default>false</default>
+      <summary>Large card previews</summary>
+      <description>Whether post rows show large media previews instead of small thumbnails.</description>
+    </key>
+    <key name="content-zoom" type="d">
+      <range min="0.8" max="2.0"/>
+      <default>1.0</default>
+      <summary>Content text size</summary>
+      <description>Zoom factor for post and comment text, in steps of 0.1.</description>
+    </key>
+    <key name="show-thumbnails" type="b">
+      <default>true</default>
+      <summary>Show thumbnails</summary>
+      <description>Whether post rows show thumbnails.</description>
+    </key>
+    <key name="show-scores" type="b">
+      <default>true</default>
+      <summary>Show scores</summary>
+      <description>Whether post and comment scores are shown.</description>
+    </key>
+
+    <!-- Content -->
+    <key name="show-nsfw" type="b">
+      <default>false</default>
+      <summary>Show NSFW content</summary>
+      <description>Whether posts marked NSFW are shown.</description>
+    </key>
+    <key name="blur-nsfw" type="b">
+      <default>true</default>
+      <summary>Blur NSFW media</summary>
+      <description>Whether media in NSFW posts is blurred until clicked.</description>
+    </key>
+    <key name="blur-spoilers" type="b">
+      <default>true</default>
+      <summary>Blur spoilers</summary>
+      <description>Whether media in posts marked as spoilers is blurred until clicked.</description>
+    </key>
+    <key name="autoplay-gifs" type="b">
+      <default>true</default>
+      <summary>Autoplay silent GIFs</summary>
+      <description>Whether silent animated images play automatically.</description>
+    </key>
+    <key name="muted-subreddits" type="as">
+      <default>[]</default>
+      <summary>Muted communities</summary>
+      <description>Lowercase community names, without the “r/” prefix, whose posts are hidden from feeds.</description>
+    </key>
+    <key name="muted-keywords" type="as">
+      <default>[]</default>
+      <summary>Muted keywords</summary>
+      <description>Posts whose titles contain any of these words are hidden. Matching ignores case.</description>
+    </key>
+
+    <!-- Notifications -->
+    <key name="notifications-enabled" type="b">
+      <default>true</default>
+      <summary>Enable notifications</summary>
+      <description>Whether Agora sends desktop notifications while it is open.</description>
+    </key>
+    <key name="notify-replies" type="b">
+      <default>true</default>
+      <summary>Notify about replies</summary>
+      <description>Whether replies to your posts and comments send a notification.</description>
+    </key>
+    <key name="notify-mentions" type="b">
+      <default>true</default>
+      <summary>Notify about mentions</summary>
+      <description>Whether mentions of your username send a notification.</description>
+    </key>
+    <key name="notify-messages" type="b">
+      <default>true</default>
+      <summary>Notify about messages</summary>
+      <description>Whether private messages send a notification.</description>
+    </key>
+
+    <!-- Subscriptions -->
+    <key name="favorite-subreddits" type="as">
+      <default>[]</default>
+      <summary>Favorite communities</summary>
+      <description>Lowercase community names pinned at the top of Subscriptions.</description>
+    </key>
+  </schema>
+</schemalist>

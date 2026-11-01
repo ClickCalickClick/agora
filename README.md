@@ -22,7 +22,7 @@ Reddit is closing its public API, so Agora does not use it, and this repository 
 
 ## Status
 
-Planning. The design lives in [docs/SPEC.md](docs/SPEC.md), with the reviews that shaped it in [docs/reviews/](docs/reviews/). No app code yet.
+Slice 1: the app runs on built-in sample data (`AGORA_MOCK=1`); reading real Reddit arrives in slice 2. The design lives in [docs/SPEC.md](docs/SPEC.md), with the reviews that shaped it in [docs/reviews/](docs/reviews/).
 
 ## Planned features
 
@@ -35,9 +35,44 @@ Planning. The design lives in [docs/SPEC.md](docs/SPEC.md), with the reviews tha
 - Full keyboard shortcuts and screen reader support
 - NSFW blurring and muted subreddits/keywords
 
-## Building (planned)
+## Building
 
-Build with Meson and Cargo against the current GNOME SDK, or with `flatpak-builder --user --install` using `build-aux/io.github.ClickCalickClick.Agora.Devel.json`. WebKitGTK 6.0 comes from the GNOME runtime. Non-Flatpak builds need WebKitGTK 6.0 and `glycin-loaders` installed on the host.
+Agora is built against the current GNOME platform. You build it yourself; there are no prebuilt packages.
+
+### Flatpak (recommended)
+
+Needs `flatpak-builder`, the GNOME 51 SDK and `org.freedesktop.Sdk.Extension.rust-stable`. First generate the vendored crate list (see [build-aux/README.md](build-aux/README.md); repeat after every `Cargo.lock` change), then:
+
+```sh
+flatpak-builder --user --install --force-clean _flatpak build-aux/io.github.ClickCalickClick.Agora.Devel.json
+flatpak run io.github.ClickCalickClick.Agora.Devel
+```
+
+### On the host
+
+Host dependencies:
+
+- GTK 4.24 and libadwaita 1.10
+- WebKitGTK 6.0 (needed from slice 2)
+- blueprint-compiler
+- Rust 1.92 or newer, with Cargo
+- Meson and gettext
+
+Quick run from the source tree, on sample data:
+
+```sh
+AGORA_MOCK=1 cargo run -p agora-app
+```
+
+Full build with Meson (installs into `_build/install`):
+
+```sh
+meson setup _build -Dprofile=development --prefix="$PWD/_build/install"
+ninja -C _build install
+AGORA_MOCK=1 XDG_DATA_DIRS="$PWD/_build/install/share:$XDG_DATA_DIRS" ./_build/install/bin/agora
+```
+
+`meson test -C _build` runs the Rust tests and validates the desktop file, AppStream metadata and GSettings schema.
 
 ## Credits
 

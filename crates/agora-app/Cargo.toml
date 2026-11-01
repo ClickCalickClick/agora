@@ -1,0 +1,27 @@
+[package]
+name = "agora-app"
+description = "Agora, an unofficial Reddit client for GNOME"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "agora"
+path = "src/main.rs"
+
+[dependencies]
+agora-core.workspace = true
+agora-markdown.workspace = true
+adw = { package = "libadwaita", version = "0.9", features = ["v1_10"] }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_24"] }
+async-channel.workspace = true
+futures.workspace = true
+gettext-rs = { version = "0.7", features = ["gettext-system"] }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+glib-build-tools = "0.22"
