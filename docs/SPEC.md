@@ -783,8 +783,9 @@ Settled during the 2026-10-31 reviews (`docs/reviews/`):
 11. **Distribution:** none. Public source, self-built; Flathub, stores, binaries and Circle are out (§1, §18).
 12. **Disclaimers:** README, About dialog and onboarding, from one `DISCLAIMER.md`, plus a first-run risk acknowledgement (§6, §18).
 
-Open until slice 0:
-- Which method works for each operation, where the CSRF token lives, whether the hidden view is throttled, and whether media CDNs accept Agora's User-Agent (§20, slice 0).
+Settled by slice 0 (`docs/SPIKE-0.md`, 2026-11-01):
+13. **Extraction results:** recorded in `crates/agora-reddit-web/STRATEGIES.md`. Same-origin `.json` is blocked; every operation uses reddit.com's own partials and GraphQL calls. The spec changes listed in `docs/SPIKE-0.md` §6 are folded into §4 at the start of slice 1.
+14. **Posting:** written in Agora and submitted through the hidden page, which runs Reddit's own invisible reCAPTCHA as shipped. One user press gives one post. Agora never retries, batches, caches tokens or uses a solver. A visible challenge or captcha rejection opens Reddit's own form in a dialog for the person to finish. Slice 4 confirms live that such posts are visible to other readers (`docs/SPIKE-0.md` §5).
 
 ---
 
