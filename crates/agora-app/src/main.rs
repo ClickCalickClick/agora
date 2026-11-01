@@ -19,7 +19,8 @@ fn main() -> glib::ExitCode {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("AGORA_LOG").unwrap_or_else(|_| "warn".into()))
         .init();
 
-    gettextrs::setlocale(LocaleCategory::LcAll, "");
+    // SAFETY: called first in main, before any other thread exists.
+    unsafe { gettextrs::setlocale(LocaleCategory::LcAll, "") };
     let _ = gettextrs::bindtextdomain(config::GETTEXT_PACKAGE, config::LOCALEDIR);
     let _ = gettextrs::bind_textdomain_codeset(config::GETTEXT_PACKAGE, "UTF-8");
     let _ = gettextrs::textdomain(config::GETTEXT_PACKAGE);
