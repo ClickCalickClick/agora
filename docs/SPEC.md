@@ -744,7 +744,7 @@ Disclaimers lower the risk but do not guarantee that no one is held responsible.
 - **Live check:** `agora --self-test` (§4.5) against the user's own session, run by hand, never in CI.
 - **Mock mode:** `AGORA_MOCK=1` starts the app on `MockBackend`, for UI work, screenshots and manual tests without a Reddit account.
 - **UI:** manual test script per slice (desktop, narrow 360 px, touch, keyboard-only, Orca).
-- **CI (GitHub Actions)**, running in the `ghcr.io/flathub-infra/flatpak-github-actions:gnome-51` container (GNOME 51 SDK), is the single authoritative list:
+- **CI (GitHub Actions)** is the single authoritative list. The Rust and data checks run in an `archlinux:latest` container, which ships the target GTK, libadwaita and WebKitGTK versions as system packages; the Flatpak job builds in the `ghcr.io/flathub-infra/flatpak-github-actions:gnome-51` container against the GNOME 51 SDK. (Changed in slice 1: the first run showed the Flatpak container has no package manager for Xvfb or Python modules.)
   - `cargo fmt --check`
   - `cargo clippy --all-targets -- -D warnings`
   - `cargo test --workspace` (GTK-dependent tests under `xvfb-run`)

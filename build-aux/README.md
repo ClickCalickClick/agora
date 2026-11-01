@@ -9,7 +9,7 @@ Build and packaging helpers. Nothing here is needed for a plain
 | `cargo-sources.json` | Vendored crate list for offline Flatpak builds. **Generated, not committed** (see below). |
 | `cargo-build.sh` | Called by the `cargo-build` target in `meson.build`; runs Cargo with the Meson-provided environment and copies the binary. |
 | `gen-potfiles.py` | Writes `po/POTFILES.in` (Meson has no glob). `--check` is run by `meson test` (`potfiles`). |
-| `sdk-run.sh` | Runs a command inside the GNOME SDK with the Rust extension. Used by CI. |
+| `sdk-run.sh` | Runs a command inside the GNOME SDK with the Rust extension, for local checks against the target runtime. |
 
 ## How the pieces fit
 
