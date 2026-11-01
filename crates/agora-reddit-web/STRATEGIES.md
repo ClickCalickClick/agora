@@ -46,7 +46,7 @@ real reddit.com page. Bodies are HTML, so `agora-markdown` needs `html_to_ast`.
 | `vote` | works | `POST /svc/shreddit/graphql` JSON `{operation:"UpdatePostVoteState", variables:{input:{postId, voteState:"UP"\|"DOWN"\|"NONE"}}, csrf_token}`; response `data.updatePostVoteState.ok` | `write_requests.json`, `write_responses.json` |
 | `subscribe` | works | GraphQL `UpdateSubredditSubscriptions` `{input:{inputs:[{subredditId, subscribeState:"SUBSCRIBED"\|"NONE"}]}}` | same |
 | `delete` (comment) | recorded, not replayed | GraphQL `DeleteComment` `{input:{commentId}}` | `write_requests.json` |
-| `comment` | **blocked by design** | `POST /svc/shreddit/{post_id}/create-comment` form (`mode=richText`, `content`=rich-text JSON, `richTextMedia`, `csrf_token`) **plus `recaptchaToken`** from Google's invisible reCAPTCHA. Agora must not generate or bypass it; see `docs/SPIKE-0.md` §5 | `write_requests.json` |
+| `comment` | recorded, not replayed | `POST /svc/shreddit/{post_id}/create-comment` form (`mode=richText`, `content`=rich-text JSON, `richTextMedia`, `csrf_token`) **plus `recaptchaToken`** from the page's own invisible reCAPTCHA (`CreateCaptchaToken`). Submitted through the hidden page under the rules in `docs/SPIKE-0.md` §5; first live check in slice 4 | `write_requests.json` |
 | `submit`, `send_message` | not tried | Expected to need reCAPTCHA like `comment` | — |
 | `save`, `hide`, `report`, `mark_read`, `edit` | not tried | Expected: GraphQL operations; record by hand-click in slice 4 | — |
 

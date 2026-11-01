@@ -7,7 +7,7 @@
 
 ## 1. Verdict
 
-**Go for slice 1, with three changes to the spec and one decision for Jared.**
+**Go for slice 1, with the spec changes in §6. Posting is decided in §5.**
 
 The exit test in §20 is met: `listing`, `post_with_comments` and `more_comments` all have a
 working same-origin method. But it is not the method the spec expected:
@@ -16,8 +16,8 @@ working same-origin method. But it is not the method the spec expected:
   "You've been blocked by network security" page. Every operation uses Reddit's own front-end
   partials and GraphQL calls instead (strategy 2), so bodies are HTML.
 - **Writes that create content need a reCAPTCHA token.** Vote, subscribe and delete work.
-  Comment needs a token from Google's invisible reCAPTCHA, which Agora must not produce
-  (§5). Submit and send-message probably need one too.
+  Comment needs a token from Google's invisible reCAPTCHA; it is submitted through the
+  hidden page under the rules in §5. Submit and send-message probably need one too.
 - **Private messages have moved to Reddit Chat.** There is no inbox page left to read.
 
 ## 2. What was run
@@ -70,21 +70,37 @@ chat client** in that page polled `matrix.redditspace.com/_matrix/client/v3/sync
 HTTP 429. That traffic came from Reddit's own scripts, not Agora. It shows why the hidden
 view must not keep a full Reddit front end running (§6, change 2).
 
-## 5. Decision for Jared: posting and replying
+## 5. Posting and replying (decided 2026-11-01)
 
-`comment` sends a `recaptchaToken`. The page first gets it from Google's invisible
-reCAPTCHA (the `CreateCaptchaToken` GraphQL call), and `create-comment` carries it. SPEC §0.3
-and §4.6 say Agora never gets around a captcha. Calling the page's reCAPTCHA from the bridge
-to mint tokens for automated posts would be exactly that. Options:
+`comment` sends a `recaptchaToken`. Reddit's page gets it from Google's invisible reCAPTCHA
+(the `CreateCaptchaToken` GraphQL call) right before `create-comment`, with no challenge shown
+to the person. The options considered were: A, hand off to Reddit's own form in a visible
+dialog; B, no posting in Agora; C, submit through the hidden page.
 
-| Option | What the user sees | Cost | Fits the rules? |
-|---|---|---|---|
-| **A. Hand off to Reddit's own form (recommended)** | Agora's composer writes the text. **Post** opens Reddit's real reply or submit page in a visible `AdwDialog` WebView, with the text on the clipboard; the user pastes and presses Reddit's own button | Small. Less native for writing | Yes. A person does the captcha'd action in Reddit's own UI |
-| B. Read-and-vote client | No commenting, posting or messaging in Agora; "Open in browser" for those | Smallest | Yes |
-| C. Generate tokens through the page's reCAPTCHA | Fully native composer | Medium, fragile | **No**, it automates a captcha |
+**Jared's decision: C. Posts are written in Agora and submitted through the hidden page.**
+This is the same sequence Reddit's front end runs when a person presses Post: the page's own,
+unmodified reCAPTCHA script produces the token, and the bridge sends it with the
+`create-comment` request. It stays within "never get around a captcha" only under these rules,
+which become part of SPEC §4.5:
 
-The spike recommends **A** for comment, submit and message, keeping the native composer for
-drafting and preview. Edit was not tested and may not need a token.
+1. **One person, one press, one post.** A token is requested only when the user presses Post
+   in Agora, and it is used for that one request. There are no queued, scheduled, retried or
+   batched submissions. The pacing lanes treat Post as an interactive request.
+2. **Reddit's reCAPTCHA runs as shipped.** Agora calls the page's own token flow. It never
+   loads its own reCAPTCHA client or a solver service, and never alters, replays or caches
+   tokens. It does not fake input events or change the User-Agent to raise the score.
+3. **A challenge goes to the person.** If Reddit answers with a visible challenge, a
+   captcha error or a rejection that names reCAPTCHA, Agora does not retry. It opens the
+   visible fallback (option A): Reddit's own reply or submit page in an `AdwDialog`, with the
+   text on the clipboard, so the person completes it in Reddit's UI. The draft is kept.
+4. **Check that posts are really visible.** Reddit may quietly filter posts whose token scores
+   low (a hidden view has no mouse or keyboard history). The slice 4 live check posts from the
+   throwaway account and confirms each comment is visible to a signed-out reader. If they are
+   filtered, posting falls back to option A by default, and Jared decides again.
+
+Not yet verified live: whether the hidden page produces a token Reddit accepts. That is the
+first slice 4 check, done with Jared on the throwaway account. Submit and send-message are
+expected to work the same way; edit may not need a token.
 
 ## 6. Spec changes this calls for
 
@@ -99,7 +115,7 @@ drafting and preview. Edit was not tested and may not need a token.
    Agora's own calls.
 3. **§4.5 operation table:** `inbox` becomes "notifications" (`/notifications`); private
    messages and `send_message` move to "Later" (Reddit Chat is a Matrix service and out of
-   scope for 1.0). `comment`, `submit` and `send_message` follow the decision in §5.
+   scope for 1.0). `comment`, `submit` and `send_message` follow the rules in §5.
 4. **§4.5 writes:** add the GraphQL request shape (`operation`, `variables`, `csrf_token`) and
    the partial `Accept` header as shared helpers in the bridge. Learn each remaining write
    (save, hide, report, mark read, edit) by recording a hand click, the way this spike did.
