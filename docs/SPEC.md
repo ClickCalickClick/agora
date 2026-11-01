@@ -54,7 +54,7 @@ These are recorded with sources in `docs/reviews/SPEC-REVIEW.md` §1. If any of 
 | Page scripts forging bridge replies | Low | Wrong data shown | Bridge script and message handler live in the isolated world `agora`; page scripts cannot reach that world's handler (§4.2) |
 | Login cookies on disk | Medium | Someone with access to the user's files can use the session | Cookies stay in WebKit's own profile under `$XDG_DATA_HOME/agora/web/`, the same exposure as any browser profile; Agora never copies or logs them |
 | Very large threads at a paced request rate | Medium | Slow loading of "more replies" | Load more only when the user asks; interactive lane jumps ahead of background work (§4.6) |
-| The hidden view is throttled by WebKit because it is not visible | Unknown | Bridge replies stall | Measured in the spike (§20, slice 0); if it happens, keep the view mapped off-screen or adjust WebKit's page visibility settings |
+| The hidden view is throttled by WebKit because it is not visible | Measured: timers yes, `fetch()` no | None for the bridge, which does not use timers | Slice 0 measured 10× slower timers and full-speed `fetch()` in the unmapped view (`docs/SPIKE-0.md` §3); the bridge never waits on timers |
 | Legal exposure for the author | Low | Claims against the author | Disclaimers in README, About and onboarding; no Reddit marks; no credentials; GPL warranty disclaimer (§18) |
 | Name clash with "Agora Linux App Store" and Agora.io | Low | Confusion if ever distributed | None needed while Agora is not listed anywhere; revisit if distribution plans change |
 
@@ -156,7 +156,7 @@ Agora is its own app built entirely from GNOME parts. The rule: **everything str
 | D-Bus | `zbus` | GNOME Shell search provider |
 | Local data | `rusqlite` (bundled SQLite) | Drafts and the saved subscription list (§14) |
 | Image decoding | `glycin` | Same sandboxed loader stack as Loupe; supports animated formats |
-| Markdown | `pulldown-cmark` plus a Reddit extension layer | Spoilers (`>!text!<`, pre-pass), superscript (`^`), `r/` and `u/` autolinks (post-pass). An HTML path is added only if the spike shows some operation returns HTML bodies (§4.5) |
+| Markdown and HTML bodies | `pulldown-cmark` plus a Reddit extension layer; `html5ever` for HTML | Spoilers (`>!text!<`, pre-pass), superscript (`^`), `r/` and `u/` autolinks (post-pass). Reddit's partials return HTML bodies (§4.5), so `html_to_ast` is part of the crate from slice 1; Markdown is still parsed for the composer preview |
 | Video | `GtkVideo` / `GtkMediaFile` (GStreamer backend) | Reddit-hosted video is DASH/HLS; see §7.4 |
 | i18n | `gettext-rs` | |
 | Logging | `tracing` | Never logs cookies, CSRF tokens or post content at info level |
@@ -256,11 +256,13 @@ Agora is **public source, self-built, for personal use** (§1, §18). It works t
 
 - **Engine:** WebKitGTK 6.0 via the `webkit6` crate (GTK 4 API), which the GNOME runtime ships.
 - **Session:** one `webkit6::NetworkSession` with persistent data and cache directories (`$XDG_DATA_HOME/agora/web/` and `$XDG_CACHE_HOME/agora/web/`). Cookies, local storage and the login live there, as in a browser profile. Agora never reads or stores the password and never copies cookies out of WebKit.
-- **Hidden view:** a `WebView` that is created but not shown, kept on a lightweight same-origin page on `https://www.reddit.com/` chosen during the spike, so all calls are same-origin and Reddit's full front-end app is not left running. It is a normal desktop WebKit; Agora does not override the User-Agent.
+- **Hidden view:** a `WebView` that is created but not shown. It sits on a **real reddit.com page** (for example `https://www.reddit.com/r/popular/`), loaded once, so all calls are same-origin and carry a normal page's Referer and fetch metadata. Slice 0 showed that a non-page document is not usable: both blocks happened while the view sat on `/robots.txt`, and nothing sent from a real page was blocked (`docs/SPIKE-0.md` §4). It is a normal desktop WebKit; Agora does not override the User-Agent.
+- **Quiet home page:** Reddit's own scripts on that page must not run background traffic (slice 0 saw Reddit's chat client poll `matrix.redditspace.com` into HTTP 429). Slice 2 evaluates a `WebKit.UserContentFilter` that blocks the chat client, ad and tracker scripts, against reloading the home page periodically, and records the choice in `STRATEGIES.md`. Neither changes what Reddit's servers see from Agora's own calls.
+- **Throttling:** the unmapped view throttles timers (about 10×) but not `fetch()`. The bridge never waits on `setTimeout`, so no off-screen mapping is needed.
 - **Isolated world:** the bridge runs in a named script world, **`agora`**. In the UI process this means passing the world name to three calls: `UserScript::for_world(..., "agora", ...)` for `agora-bridge.js`, `UserContentManager::register_script_message_handler("agora", Some("agora"))`, and every `call_async_javascript_function(..., Some("agora"), ...)`. Page scripts cannot call the bridge or post to its handler. Requests the bridge makes still travel over the page's network stack, so Reddit's servers see them like any other request from that page.
 - **Calls:** an operation starts with `WebView::call_async_javascript_function` with body `return agora.run(op, args)` and a typed `arguments` dictionary (`op: String`, `args: JSON`). Arguments are never interpolated into script text. Results up to 64 KiB return as the promise value; larger results are posted to the `agora` message handler in chunks keyed by request id.
 - **Bridge loading:** `agora-bridge.js` and `ops/*.js` are compiled into `agora-reddit-web` with `include_str!`, so the crate loads its own scripts under plain `cargo test` and in the app.
-- **CSRF token:** where a write needs one, the operation reads it from where the spike finds it (a cookie or a DOM attribute) and records the source in `STRATEGIES.md`.
+- **CSRF token:** the `csrf_token` cookie, read with `document.cookie` from the `agora` world. Partial POSTs send it as a `csrf_token` form field, GraphQL calls as a JSON field. `reddit_session` is HttpOnly and never visible to the bridge.
 - **Threading:** WebKit lives on the GTK main thread. `RedditWebBackend` holds the view and exposes futures that are **not `Send`**, polled on the GLib main context.
 
 ### 4.3 Backend trait
@@ -287,13 +289,25 @@ Exact signatures are frozen at the end of slice 1 (§20) from what the spike and
 
 Every operation is a small, versioned JavaScript function in `crates/agora-reddit-web/js/ops/<operation>.js`, paired with a Rust parser in `src/parse/<operation>.rs`.
 
-**One extraction method per operation.** The slice 0 spike (§20) tries each operation against a live session and picks the method that works, in this order of preference:
-1. **Same-origin JSON** — `fetch()` with `credentials: "include"` against JSON endpoints the logged-in site serves (for example `/r/{sub}/hot.json`, `/comments/{id}.json`, `/api/me.json`). Gives Markdown bodies and full metadata.
-2. **Site-internal endpoints** — endpoints reddit.com's own front end calls (for example partials under `/svc/shreddit/…`), parsed in the page with `DOMParser`.
+**One extraction method per operation.** Slice 0 (`docs/SPIKE-0.md`) found that same-origin `.json` endpoints are blocked ("You've been blocked by network security"), so there is **one method for every operation: reddit.com's own front-end endpoints**. Reads use the HTML partials under `/svc/shreddit/…` (and a few full pages such as `/search/`), parsed in Rust from the HTML body; writes use the same GraphQL and partial POST calls the front end sends. `.json` is not used.
 
-The chosen method for each operation, and the date it was checked, are recorded in `crates/agora-reddit-web/STRATEGIES.md`. A second method is added to an operation only after the first one actually breaks. Agora does not navigate the hidden view to scrape full pages, and **never operates the page's own buttons or forms**.
+- **Partials** are requested with `Accept: text/vnd.reddit.partial+html, text/html;q=0.9` (what `faceplate-partial` sends) or a URL that already carries `render-mode=partial`. Without it some routes return a full page shell or HTTP 406.
+- **Templates:** comment trees put most comments inside `<template>` elements; parsers descend into template content.
+- **Block detection:** HTTP 403 whose body contains "blocked by network security", HTTP 429, and redirects to `/login` are pushback (§4.6).
 
-**Writes** (vote, save, comment, submit, message) send the same request the site's own front end sends, and are confirmed from that request's response. Stores apply votes and saves optimistically and revert them, with an error toast, if the response is an error. There is no separate read-back request.
+The method for each operation, and the date it was checked, are recorded in `crates/agora-reddit-web/STRATEGIES.md`. A second method is added to an operation only after the first one actually breaks. Agora does not navigate the hidden view to scrape full pages, and **never operates the page's own buttons or forms**.
+
+**Writes** send the same request the site's own front end sends, and are confirmed from that request's response. Stores apply votes and saves optimistically and revert them, with an error toast, if the response is an error. There is no separate read-back request. The bridge has two shared helpers so each write op is a few lines:
+- `agora.graphql(operation, variables)` → `POST /svc/shreddit/graphql` with JSON `{operation, variables, csrf_token}`; the response's `data.<operation>.ok` (or the operation's own field) confirms it.
+- `agora.partialPost(url, form)` → form POST with `csrf_token` added and the partial `Accept` header.
+
+Each write not yet seen (save, hide, report, mark read, edit, submit) is learned by recording what the page sends when Jared clicks it by hand, as slice 0 did, before its op is written.
+
+**Posting** (`comment`, `submit`) needs a reCAPTCHA token. It is written in Agora and submitted through the hidden page under these rules (decided by Jared, `docs/SPIKE-0.md` §5; §21 #14):
+1. One person, one press, one post: a token is requested only when the user presses Post, and used for that one request. No queued, scheduled, retried or batched submissions; Post is an interactive request (§4.6).
+2. Reddit's reCAPTCHA runs as shipped: Agora calls the page's own token flow, never loads its own reCAPTCHA client or a solver, never alters, replays or caches tokens, and never fakes input events or changes the User-Agent.
+3. A challenge goes to the person: a visible challenge, a captcha error or a rejection naming reCAPTCHA is not retried. Agora opens Reddit's own reply or submit page in an `AdwDialog` with the text on the clipboard, and keeps the draft.
+4. Slice 4 confirms live that posts made this way are visible to a signed-out reader; if they are filtered, posting falls back to rule 3's dialog by default and Jared decides again.
 
 **Operation table** (frozen with the trait at the end of slice 1):
 
@@ -306,17 +320,19 @@ The chosen method for each operation, and the date it was checked, are recorded 
 | `subreddit_info` | read | `Subreddit` (includes posting requirements) |
 | `subscriptions` | read | `Vec<Subreddit>` |
 | `user_profile` | read | `User` |
-| `inbox` (tab, `after` cursor) | read | `Listing<Message>` |
+| `notifications` (`after` cursor) | read | `Listing<Notification>` (from `/notifications`; private messages are in Reddit Chat and out of scope) |
 | `search` (query, scope, sort, time range, `after`) | read | `SearchResults` |
 | `vote`, `save`, `hide`, `subscribe`, `mark_read` | write | `()` |
 | `submit`, `comment`, `edit` | write | the created or edited item |
-| `delete`, `report`, `send_message` | write | `()` |
+| `delete`, `report` | write | `()` |
+
+`inbox` was replaced by `notifications`: slice 0 found that private messages moved to Reddit Chat (a Matrix service at `matrix.redditspace.com`), so there is no message inbox left to read. Private messages and `send_message` move to "Later" (§20). `comment` and `submit` follow the posting rules above.
 
 "Load more" in comment trees uses `more_comments` like any other operation, with whatever method the spike selects.
 
 **Self-test:** a "Check Reddit connection" action in Preferences (and `agora --self-test`) runs every read operation once, inside the pacing limits of §4.6 (so it takes about 15 seconds), and reports which ones broke.
 
-**Body format:** if every read operation returns Markdown, `agora-markdown` has only a Markdown parser. If the spike shows an operation returns HTML bodies, an `html_to_ast` path is added for that operation then, with an allow-list of tags (p, a, em, strong, del, code, pre, blockquote, ul/ol/li, table, sup, spoiler spans).
+**Body format:** the partials return post and comment bodies as HTML. `agora-markdown` has two entry points that produce the same AST (§7.6): `html_to_ast` for bodies read from Reddit, with an allow-list of tags (p, a, em, strong, del, code, pre, blockquote, ul/ol/li, table, sup, h1–h6, hr, br, img, spoiler spans) where anything else keeps only its text; and `markdown_to_ast` for the composer preview and `MockBackend`. Models carry the body as `Body::Html` or `Body::Markdown` and the renderer converts either.
 
 ### 4.6 Human-paced traffic
 
@@ -754,7 +770,7 @@ Agora is built in **slices**. Each slice delivers a working app that does more t
 | 4 | Interaction | Write extractors; voting, saving, hiding, reporting, subscribe/unsubscribe; composer (all modes) with toolbar, preview, drafts; edit/delete; user profiles | The user can post, reply, edit, delete, vote and save end to end, each confirmed from Reddit's response |
 | 5 | Inbox and desktop | Inbox and messages; notifications while the window is open; search with scope toggle; Shell search provider; URL routing, open-from-clipboard, drag-and-drop; share menu; Preferences complete; filters | Each feature in §10, §12 and §15 works inside the Flatpak build |
 | 6 | Polish and source release | App and symbolic icon, empty-state art, shortcuts dialog, AppStream screenshots (from mock mode), full Orca and RTL pass, build instructions in README, tagged release notes (no binaries) | A fresh clone builds and installs with the documented `flatpak-builder` command; disclaimer present in README, About and onboarding; Jared uses it signed in for 7 days of ordinary reading and commenting with no captcha or block |
-| Later | | Offline cache of viewed and saved posts with size limit and Clear Cache; background inbox checking after the window closes (Background portal, 30 min minimum); offline action queue; polls; share portal if one is added to GNOME; multi-account | |
+| Later | | Private messages and `send_message` (Reddit Chat, §4.5); offline cache of viewed and saved posts with size limit and Clear Cache; background inbox checking after the window closes (Background portal, 30 min minimum); offline action queue; polls; share portal if one is added to GNOME; multi-account | |
 
 ### 20.1 Rules for every slice
 
@@ -784,7 +800,7 @@ Settled during the 2026-10-31 reviews (`docs/reviews/`):
 12. **Disclaimers:** README, About dialog and onboarding, from one `DISCLAIMER.md`, plus a first-run risk acknowledgement (§6, §18).
 
 Settled by slice 0 (`docs/SPIKE-0.md`, 2026-11-01):
-13. **Extraction results:** recorded in `crates/agora-reddit-web/STRATEGIES.md`. Same-origin `.json` is blocked; every operation uses reddit.com's own partials and GraphQL calls. The spec changes listed in `docs/SPIKE-0.md` §6 are folded into §4 at the start of slice 1.
+13. **Extraction results:** recorded in `crates/agora-reddit-web/STRATEGIES.md`. Same-origin `.json` is blocked; every operation uses reddit.com's own partials and GraphQL calls. The spec changes listed in `docs/SPIKE-0.md` §6 were folded into §3.2 and §4 at the start of slice 1 (hidden view on a real page, partials only, `html_to_ast` in slice 1, `notifications` instead of `inbox`, private messages moved to Later).
 14. **Posting:** written in Agora and submitted through the hidden page, which runs Reddit's own invisible reCAPTCHA as shipped. One user press gives one post. Agora never retries, batches, caches tokens or uses a solver. A visible challenge or captcha rejection opens Reddit's own form in a dialog for the person to finish. Slice 4 confirms live that such posts are visible to other readers (`docs/SPIKE-0.md` §5).
 
 ---
