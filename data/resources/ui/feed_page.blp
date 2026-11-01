@@ -1,0 +1,158 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AgoraFeedPage: Adw.NavigationPage {
+  title: bind title_widget.title;
+  tag: "feed";
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {
+      [start]
+      Gtk.ToggleButton sidebar_button {
+        icon-name: "sidebar-show-symbolic";
+        tooltip-text: _("Show Sidebar");
+        action-name: "win.toggle-sidebar";
+      }
+
+      title-widget: Adw.WindowTitle title_widget {};
+
+      [end]
+      Gtk.MenuButton sort_button {
+        icon-name: "view-sort-descending-symbolic";
+        tooltip-text: _("Sort Posts");
+        menu-model: sort_menu;
+      }
+
+      [end]
+      Gtk.Button {
+        icon-name: "view-refresh-symbolic";
+        tooltip-text: _("Refresh");
+        action-name: "feed.refresh";
+      }
+    }
+
+    content: Gtk.Stack stack {
+      transition-type: crossfade;
+
+      Gtk.StackPage {
+        name: "loading";
+
+        child: Adw.Spinner {
+          halign: center;
+          valign: center;
+          width-request: 32;
+          height-request: 32;
+        };
+      }
+
+      Gtk.StackPage {
+        name: "status";
+
+        child: Adw.StatusPage status_page {
+          child: Gtk.Button status_button {
+            halign: center;
+            label: _("_Retry");
+            use-underline: true;
+            action-name: "feed.refresh";
+
+            styles [
+              "pill",
+            ]
+          };
+        };
+      }
+
+      Gtk.StackPage {
+        name: "list";
+
+        child: Gtk.ScrolledWindow scroller {
+          hscrollbar-policy: never;
+
+          child: Gtk.ListView list_view {
+            single-click-activate: true;
+            tab-behavior: item;
+            activate => $on_activate() swapped;
+
+            accessibility {
+              label: _("Posts");
+            }
+
+            styles [
+              "navigation-sidebar",
+              "post-list",
+            ]
+          };
+        };
+      }
+    };
+  };
+}
+
+menu sort_menu {
+  section {
+    item {
+      label: _("_Best");
+      action: "feed.sort";
+      target: "best";
+    }
+
+    item {
+      label: _("_Hot");
+      action: "feed.sort";
+      target: "hot";
+    }
+
+    item {
+      label: _("_New");
+      action: "feed.sort";
+      target: "new";
+    }
+
+    item {
+      label: _("_Rising");
+      action: "feed.sort";
+      target: "rising";
+    }
+  }
+
+  section {
+    label: _("Top");
+
+    item {
+      label: _("Past _Hour");
+      action: "feed.sort";
+      target: "top:hour";
+    }
+
+    item {
+      label: _("Past _Day");
+      action: "feed.sort";
+      target: "top:day";
+    }
+
+    item {
+      label: _("Past _Week");
+      action: "feed.sort";
+      target: "top:week";
+    }
+
+    item {
+      label: _("Past _Month");
+      action: "feed.sort";
+      target: "top:month";
+    }
+
+    item {
+      label: _("Past _Year");
+      action: "feed.sort";
+      target: "top:year";
+    }
+
+    item {
+      label: _("_All Time");
+      action: "feed.sort";
+      target: "top:all";
+    }
+  }
+}

@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=Agora
+GenericName=Reddit Client
+Comment=Browse and discuss Reddit
+# Translators: Search terms to find this application. Do NOT translate or localize the semicolons! The list MUST also end with a semicolon!
+Keywords=Reddit;Subreddit;Forum;Social;News;Discussion;
+Type=Application
+Exec=agora %U
+Terminal=false
+Categories=Network;News;GTK;GNOME;
+# Translators: Do NOT translate or transliterate this text (this is an icon file name)!
+Icon=@app_id@
+StartupNotify=true
+DBusActivatable=false
+X-Purism-FormFactor=Workstation;Mobile;

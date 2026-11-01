@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Agora contributors -->
+<component type="desktop-application">
+  <id>@app_id@</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Agora</name>
+  <summary>Browse and discuss Reddit</summary>
+  <description>
+    <p>
+      Agora is a native GNOME app for reading and discussing Reddit. It adapts
+      from desktop to phone, works with keyboard, touch and screen readers, and
+      follows your system style and accent color.
+    </p>
+    <p>
+      Agora is an unofficial, independent project. It is not affiliated with,
+      endorsed by, or sponsored by Reddit, Inc. “Reddit” is a trademark of
+      Reddit, Inc. and is used only to describe what this app works with.
+    </p>
+    <p>
+      Agora is for personal use and works through your own reddit.com login.
+      It depends on reddit.com’s website and may stop working at any time.
+    </p>
+  </description>
+  <developer id="io.github.clickcalickclick">
+    <name translate="no">Jared</name>
+  </developer>
+  <url type="homepage">https://github.com/ClickCalickClick/agora</url>
+  <url type="bugtracker">https://github.com/ClickCalickClick/agora/issues</url>
+  <url type="vcs-browser">https://github.com/ClickCalickClick/agora</url>
+  <launchable type="desktop-id">@app_id@.desktop</launchable>
+  <translation type="gettext">@gettext_package@</translation>
+  <keywords>
+    <keyword>Reddit</keyword>
+    <keyword>Subreddit</keyword>
+    <keyword>Forum</keyword>
+    <keyword>Social</keyword>
+    <keyword>News</keyword>
+    <keyword>Discussion</keyword>
+  </keywords>
+  <categories>
+    <category>Network</category>
+    <category>News</category>
+  </categories>
+  <branding>
+    <color type="primary" scheme_preference="light">#e8dcc4</color>
+    <color type="primary" scheme_preference="dark">#1f4e4f</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <!-- Users can read posts and comments written by other people, including
+       discussion moderated by each community, and can post and send messages (later slices). -->
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">moderate</content_attribute>
+    <content_attribute id="social-info">mild</content_attribute>
+    <content_attribute id="social-audio">none</content_attribute>
+    <content_attribute id="social-location">none</content_attribute>
+    <content_attribute id="social-contacts">none</content_attribute>
+    <content_attribute id="money-purchasing">none</content_attribute>
+  </content_rating>
+  <releases>
+    <release version="0.1.0" date="2026-10-31">
+      <description>
+        <p>First reading slice (sample data only).</p>
+      </description>
+    </release>
+  </releases>
+</component>

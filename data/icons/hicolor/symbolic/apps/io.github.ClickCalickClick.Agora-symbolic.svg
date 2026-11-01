@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Agora symbolic icon. Temporary placeholder: slice 6 redesigns it (SPEC §2.1).
+     Portico with a speech-bubble-shaped opening between its columns. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path fill="#222222" d="M8 0.5 15 4v1.25H1V4z"/>
+  <path fill="#222222" fill-rule="evenodd" d="M1 6h14v7H1zM4 7.5h8a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H6.5L4 12.5V11a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1zM6 7.5h1.25V11H6zM8.75 7.5H10V11H8.75z"/>
+  <rect fill="#222222" x="0" y="14" width="16" height="1.5" rx="0.5"/>
+</svg>

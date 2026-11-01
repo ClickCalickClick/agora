@@ -1,0 +1,9 @@
+/target
+/_build
+/build
+*.ui~
+/.flatpak-builder
+/repo
+/_flatpak
+/.cargo-home
+/build-aux/cargo-sources.json

@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/agora-core",
+    "crates/agora-markdown",
+    "crates/agora-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/ClickCalickClick/agora"
+
+[workspace.dependencies]
+agora-core = { path = "crates/agora-core" }
+agora-markdown = { path = "crates/agora-markdown" }
+async-channel = "2"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[profile.release]
+lto = "thin"

@@ -1,0 +1,114 @@
+/* Agora: stock libadwaita plus a few signature touches (SPEC §2.1).
+   Colors come from libadwaita variables only; the accent is the system's. */
+
+/* Quiet rows */
+.post-list > row {
+  border-radius: 12px;
+}
+
+.score.upvoted {
+  color: var(--accent-color);
+}
+
+.score.downvoted {
+  color: var(--dim-fg-color, alpha(currentColor, 0.55));
+  opacity: 0.7;
+}
+
+.upvote:checked {
+  color: var(--accent-color);
+}
+
+.badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background-color: alpha(currentColor, 0.1);
+}
+
+.badge.accent {
+  color: var(--accent-color);
+  background-color: alpha(var(--accent-bg-color), 0.15);
+}
+
+/* Community header */
+.community-header {
+  padding: 14px;
+}
+
+/* Conversation lines */
+.thread-line {
+  background-color: alpha(currentColor, 0.15);
+  border-radius: 1px;
+  transition: background-color 150ms ease-out;
+}
+
+.thread-line.highlight {
+  background-color: var(--accent-color);
+}
+
+.comment-list > row {
+  padding: 0;
+}
+
+.comment-list > row:focus-within .thread-slot:last-child .thread-line,
+.comment-list > row:selected .thread-slot:last-child .thread-line {
+  background-color: var(--accent-color);
+}
+
+.comment-list > row:selected {
+  background-color: alpha(var(--accent-bg-color), 0.08);
+}
+
+.collapsed {
+  opacity: 0.75;
+}
+
+.comment-actions button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.comment-actions {
+  opacity: 0.55;
+  transition: opacity 150ms ease-out;
+}
+
+.comment-list > row:hover .comment-actions,
+.comment-list > row:focus-within .comment-actions,
+.comment-list > row:selected .comment-actions {
+  opacity: 1;
+}
+
+.more-button {
+  padding-left: 6px;
+  padding-right: 6px;
+  color: var(--accent-color);
+}
+
+.focus-note {
+  padding: 8px 12px;
+}
+
+/* Rendered Markdown */
+.markdown .blockquote {
+  border-left: 3px solid alpha(currentColor, 0.2);
+  padding-left: 12px;
+}
+
+.markdown .code-block {
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.06);
+}
+
+.markdown .code-block label {
+  padding: 8px 10px;
+}
+
+.markdown .list-marker {
+  opacity: 0.7;
+}
+
+.post-actions .score {
+  min-width: 2em;
+}
