@@ -1,0 +1,31 @@
+[package]
+name = "agora-reddit-web"
+description = "Agora's Backend on a hidden WebKit session: JS bridge, parsers and human-paced request lanes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dev-dependencies]
+futures = { workspace = true }
+
+[dependencies]
+agora-core.workspace = true
+async-channel.workspace = true
+ego-tree = "0.11"
+futures.workspace = true
+gtk = { package = "gtk4", version = "0.11", features = ["v4_24"] }
+scraper = "0.29"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+webkit6 = { version = "0.6", features = ["v2_50"] }
+
+[[test]]
+# A real hidden WebView against a local server. GTK must stay on one thread, so
+# this has its own main. Without a display it reports that and passes.
+name = "bridge"
+harness = false

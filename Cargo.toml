@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/agora-core",
     "crates/agora-markdown",
+    "crates/agora-reddit-web",
     "crates/agora-app",
 ]
 
