@@ -28,7 +28,7 @@ jobs:
       - name: Install build dependencies
         run: |
           pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita webkitgtk-6.0 \
-            blueprint-compiler meson appstream desktop-file-utils python
+            blueprint-compiler meson appstream desktop-file-utils python xorg-server-xvfb
       - uses: actions/checkout@v4
 
       - uses: actions/cache@v4
@@ -50,8 +50,11 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: cargo test
-        # Store tests use GObjects and in-memory GSettings only; no display.
-        run: cargo test --workspace
+        # The bridge test drives a real hidden WebView against a local server,
+        # so it needs a display. WebKit's sandbox cannot start in this container.
+        run: xvfb-run -a cargo test --workspace
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
 
       - name: Meson build and tests (appstreamcli, desktop-file-validate, schema, POTFILES)
         run: |
@@ -70,7 +73,7 @@ jobs:
       - run: |
           pip install aiohttp tomlkit toml
           curl -fsSL -o /tmp/flatpak-cargo-generator.py \
-            https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
+            https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/9d86d336a39b9af38b86f114b6ce5820fe260f91/cargo/flatpak-cargo-generator.py
           python3 /tmp/flatpak-cargo-generator.py Cargo.lock -o cargo-sources.json
       - uses: actions/upload-artifact@v4
         with:

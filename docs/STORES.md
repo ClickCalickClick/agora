@@ -35,9 +35,10 @@ Rules that apply to every store:
 
 | | |
 |---|---|
-| Properties | `username: String` (empty when signed out), `state: SessionState` (`Unknown`, `SignedIn`, `SignedOut`, `Expired`, `Blocked`) |
-| Methods | `check()` runs `whoami`; `can_request() -> bool` |
+| Properties | `username: String` (empty when signed out), `state: SessionState` (`Unknown`, `SignedIn`, `SignedOut`, `Expired`, `Blocked`, `CheckFailed`) |
+| Methods | `check()` runs `whoami`; `can_request() -> bool`; `refusal() -> Option<AgoraError>` (why not, for a page's error); `sign_out(on_error)` |
 | Listens to | `Backend::events()`: `SignedIn`, `SignedOut`, `SessionExpired`, `Blocked` |
+| Rules | Every store and write checks `can_request()` before calling the backend. `Blocked` ends with a new `check()` when the back-off ends. `check()` is not called before the risk acknowledgement (SPEC §6) |
 
 ## FeedStore
 
@@ -54,7 +55,7 @@ Rules that apply to every store:
 |---|---|
 | Model | `rows() -> gio::ListStore<CommentObject>`: the visible rows of the flattened tree |
 | Properties | `post: PostObject?`, `state: LoadState`, `error`, `focused: bool` (showing one branch), `sort-key` |
-| Methods | `open(&PostObject)`, `open_id(PostId)`, `close()`, `reload()`, `set_sort(CommentSort)`, `focus_comment(CommentId)` / `unfocus()` ("Continue this thread"), `toggle_collapsed(&row)`, `highlight_branch(&row, on)`, `load_more(&row)` |
+| Methods | `open(&PostObject)`, `open_id(SubredditName, PostId)`, `close()`, `reload()`, `set_sort(CommentSort)`, `focus_comment(CommentId)` / `unfocus()` ("Continue this thread"), `toggle_collapsed(&row)`, `highlight_branch(&row, on)`, `load_more(&row)` |
 | Flattening | Rows are indented relative to the shallowest comment received (`Comment::depth` stays absolute in the backend), so a focused branch starts at level 0. Comments deeper than 8 levels become one "Continue this thread" row per parent. Collapsing moves the branch's rows into the comment's stash and back, so nested collapse state survives |
 
 ## SubscriptionsStore
@@ -63,7 +64,7 @@ Rules that apply to every store:
 |---|---|
 | Model | `list() -> gio::ListStore<SubredditObject>`, favorites (`favorite-subreddits`) first, then by name |
 | Properties | `state: LoadState` |
-| Methods | `refresh()` |
+| Methods | `refresh()`; also refreshes on `SignedIn`, clears on `SignedOut`. Shows the list saved in `agora.db` until the refresh |
 
 ## Writes
 
@@ -75,7 +76,8 @@ a later change.
 
 `vote_post(&PostObject, VoteState)`, `vote_comment(&CommentObject, VoteState)`
 (voting the current vote again clears it), `toggle_save_post`,
-`toggle_save_comment`. Subscribing goes through `win.toggle-subscribe`.
+`toggle_save_comment`, `toggle_subscribe(&SubredditObject, on_success)` (does
+nothing until the subreddit's id has loaded).
 
 ## Stores planned for later slices
 
@@ -99,9 +101,11 @@ Their shape is fixed now so later slices do not reshape the window:
 | `window.close` | GTK | Ctrl+W | Close the window |
 | `win.toggle-sidebar` | window | F9 | Show or hide the sidebar (property action on `show-sidebar`) |
 | `win.refresh` | window | F5, Ctrl+R | Reload the post if the post pane has focus, else the feed |
-| `win.back` | window | | Back: leave a focused branch, then the post pane |
+| `win.back` | window | Alt+← | Back: leave a focused branch, then the post pane |
 | `win.zoom-in`, `win.zoom-out`, `win.zoom-reset` | window | Ctrl++, Ctrl+-, Ctrl+0 | Content zoom 80–200% (`content-zoom`) |
-| `win.toggle-subscribe(s)` | window | | Join or leave the subreddit shown in the list pane |
+| `win.toggle-subscribe` | window | | Join or leave the subreddit shown in the list pane |
+| `win.sign-in` | window | | Welcome before the risk acknowledgement, otherwise the sign-in dialog |
+| `win.sign-out` | window | | Asks, then signs out |
 | `feed.refresh` | feed page (widget action) | | Reload the feed |
 | `feed.sort(s)` | feed page (property action on `sort-target`) | | `best`, `hot`, `new`, `rising`, `top:<range>` |
 | `post.sort(s)` | post page (property action on `sort-target`) | | Comment sort key |
