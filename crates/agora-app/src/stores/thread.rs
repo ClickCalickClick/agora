@@ -1,13 +1,13 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use agora_core::{AgoraError, CommentId, CommentNode, CommentSort, PostId, ThreadRequest};
+use agora_core::{AgoraError, CommentId, CommentNode, CommentSort, PostId, SubredditName, ThreadRequest};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
 use super::context::error_message;
-use super::{CommentObject, CommentRowKind, Context, LoadState, PostObject};
+use super::{CommentObject, CommentRowKind, Context, LoadState, PostObject, SessionState};
 
 /// Deepest visual level; deeper replies show "Continue this thread" (SPEC §8.1).
 pub const MAX_VISUAL_DEPTH: u32 = 8;
@@ -20,9 +20,12 @@ mod imp {
     pub struct ThreadStore {
         pub ctx: RefCell<Option<Rc<Context>>>,
         pub post_id: RefCell<Option<PostId>>,
+        pub subreddit: RefCell<Option<SubredditName>>,
         pub focus: RefCell<Option<CommentId>>,
         pub sort: Cell<CommentSort>,
         pub generation: Cell<u64>,
+        /// A `post_with_comments` request is running.
+        pub in_flight: Cell<bool>,
         /// Absolute depth shown at level 0 (non-zero for a focused branch).
         pub base_depth: Cell<u32>,
         pub rows: RefCell<Option<gio::ListStore>>,
@@ -116,6 +119,22 @@ impl ThreadStore {
         imp.sort.set(sort);
         imp.sort_key.replace(sort.key().into());
         imp.rows.replace(Some(gio::ListStore::new::<CommentObject>()));
+        // A post stopped by a block loads again when the block ends.
+        ctx.session.connect_state_notify(glib::clone!(
+            #[weak]
+            obj,
+            move |session| {
+                if session.state() == SessionState::SignedOut {
+                    obj.close();
+                } else if session.can_request()
+                    && matches!(obj.state(), LoadState::Error | LoadState::Loading)
+                    && obj.rows().n_items() == 0
+                    && !obj.imp().in_flight.get()
+                {
+                    obj.reload();
+                }
+            }
+        ));
         imp.ctx.replace(Some(ctx));
         obj
     }
@@ -134,16 +153,19 @@ impl ThreadStore {
     pub fn open(&self, post: &PostObject) {
         let imp = self.imp();
         imp.post_id.replace(Some(post.with(|p| p.id.clone())));
+        imp.subreddit.replace(Some(post.with(|p| p.subreddit.clone())));
         imp.post.replace(Some(post.clone()));
         self.notify_post();
         self.set_focus(None);
         self.reload();
     }
 
-    /// Opens a post by id (links).
-    pub fn open_id(&self, id: PostId) {
+    /// Opens a post by id (links). Reddit's comment endpoints need the
+    /// subreddit too; a permalink carries it.
+    pub fn open_id(&self, subreddit: SubredditName, id: PostId) {
         let imp = self.imp();
         imp.post_id.replace(Some(id));
+        imp.subreddit.replace(Some(subreddit));
         imp.post.replace(None);
         self.notify_post();
         self.set_focus(None);
@@ -154,7 +176,9 @@ impl ThreadStore {
     pub fn close(&self) {
         let imp = self.imp();
         imp.generation.set(imp.generation.get() + 1);
+        imp.in_flight.set(false);
         imp.post_id.replace(None);
+        imp.subreddit.replace(None);
         imp.post.replace(None);
         self.notify_post();
         self.rows().remove_all();
@@ -200,26 +224,38 @@ impl ThreadStore {
     /// Loads the post and its comments again.
     pub fn reload(&self) {
         let imp = self.imp();
-        let Some(post) = imp.post_id.borrow().clone() else {
+        let (Some(post), Some(subreddit)) = (imp.post_id.borrow().clone(), imp.subreddit.borrow().clone()) else {
             return;
         };
         imp.generation.set(imp.generation.get() + 1);
         let generation = imp.generation.get();
         self.rows().remove_all();
+        let session = self.ctx().session.clone();
+        imp.in_flight.set(false);
+        if !session.can_request() {
+            match session.refusal() {
+                Some(reason) => self.set_error(&reason),
+                None => self.set_state(LoadState::Loading),
+            }
+            return;
+        }
         self.set_state(LoadState::Loading);
         let request = ThreadRequest {
+            subreddit,
             post,
             sort: imp.sort.get(),
             focus: imp.focus.borrow().clone(),
         };
         let backend = self.ctx().backend.clone();
         let weak = self.downgrade();
+        imp.in_flight.set(true);
         glib::spawn_future_local(async move {
             let result = backend.post_with_comments(request).await;
             let Some(obj) = weak.upgrade() else { return };
             if obj.imp().generation.get() != generation {
                 return;
             }
+            obj.imp().in_flight.set(false);
             match result {
                 Ok((post, nodes)) => {
                     let current = obj.post();
@@ -238,11 +274,7 @@ impl ThreadStore {
                     obj.set_state(LoadState::Done);
                 }
                 Err(AgoraError::Cancelled) => obj.set_state(LoadState::Idle),
-                Err(e) => {
-                    obj.imp().error.replace(error_message(&e));
-                    obj.notify_error();
-                    obj.set_state(LoadState::Error);
-                }
+                Err(e) => obj.set_error(&e),
             }
         });
     }
@@ -311,7 +343,7 @@ impl ThreadStore {
 
     /// Loads the comments behind a "more" row and puts them in its place.
     pub fn load_more(&self, row: &CommentObject) {
-        if row.kind() != CommentRowKind::More || row.loading() {
+        if row.kind() != CommentRowKind::More || row.loading() || !self.ctx().session.can_request() {
             return;
         }
         let (Some(token), Some(post)) = (row.token(), self.imp().post_id.borrow().clone()) else {
@@ -357,6 +389,12 @@ impl ThreadStore {
         });
     }
 
+    fn set_error(&self, error: &AgoraError) {
+        self.imp().error.replace(error_message(error));
+        self.notify_error();
+        self.set_state(LoadState::Error);
+    }
+
     fn set_state(&self, state: LoadState) {
         let imp = self.imp();
         if state != LoadState::Error && !imp.error.borrow().is_empty() {
@@ -375,11 +413,11 @@ mod tests {
     use agora_core::MockBackend;
 
     use super::*;
-    use crate::stores::test_util::{context, run_until, with_main_context};
+    use crate::stores::test_util::{context, run_until, unchecked_context, with_main_context};
 
     fn loaded(post: &str) -> ThreadStore {
         let store = ThreadStore::new(context(MockBackend::new()));
-        store.open_id(PostId::new(post));
+        store.open_id(SubredditName::new("gnome"), PostId::new(post));
         run_until(|| store.state() == LoadState::Done);
         store
     }
@@ -387,6 +425,33 @@ mod tests {
     fn rows(store: &ThreadStore) -> Vec<CommentObject> {
         let r = store.rows();
         (0..r.n_items()).map(|i| r.item(i).and_downcast().unwrap()).collect()
+    }
+
+    #[test]
+    fn opening_before_sign_in_waits_for_it() {
+        with_main_context(|| {
+            let ctx = unchecked_context(MockBackend::new());
+            let store = ThreadStore::new(ctx.clone());
+            store.open_id(SubredditName::new("gnome"), PostId::new("t3_showcase7"));
+            assert_eq!(store.state(), LoadState::Loading);
+            assert_eq!(store.rows().n_items(), 0);
+            ctx.session.check();
+            run_until(|| store.state() == LoadState::Done);
+            assert!(store.rows().n_items() > 0);
+        })
+    }
+
+    #[test]
+    fn signed_out_shows_an_error_instead_of_a_spinner() {
+        with_main_context(|| {
+            let backend = MockBackend::new();
+            backend.set_signed_in(false);
+            let ctx = context(backend);
+            assert_eq!(ctx.session.state(), SessionState::SignedOut);
+            let store = ThreadStore::new(ctx);
+            store.open_id(SubredditName::new("gnome"), PostId::new("t3_showcase7"));
+            assert_eq!(store.state(), LoadState::Error);
+        })
     }
 
     #[test]

@@ -41,6 +41,8 @@ pub struct ListingRequest {
 /// Arguments of `post_with_comments`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ThreadRequest {
+    /// The subreddit the post is in; every comment endpoint needs it.
+    pub subreddit: SubredditName,
     /// The post.
     pub post: PostId,
     /// Comment order.
@@ -112,8 +114,8 @@ pub trait Backend {
     fn save(&self, target: Thing, saved: bool) -> BackendFuture<()>;
     /// Hides or unhides a post.
     fn hide(&self, post: PostId, hidden: bool) -> BackendFuture<()>;
-    /// Joins or leaves a subreddit.
-    fn subscribe(&self, subreddit: Subreddit, subscribed: bool) -> BackendFuture<()>;
+    /// Joins or leaves a subreddit, by its `t5_…` id ([`Subreddit::id`]).
+    fn subscribe(&self, subreddit_id: String, subscribed: bool) -> BackendFuture<()>;
     /// Marks notifications read.
     fn mark_read(&self, notification_ids: Vec<String>) -> BackendFuture<()>;
     /// Submits a new post (posting rules, SPEC §4.5).

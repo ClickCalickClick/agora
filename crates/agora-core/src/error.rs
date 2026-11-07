@@ -41,6 +41,10 @@ pub enum AgoraError {
     /// another view (interactive lane, SPEC §4.6). Not shown to the user.
     #[error("cancelled")]
     Cancelled,
+    /// The backend cannot do this yet: writes reach the real backend in
+    /// slice 4 (SPEC §20).
+    #[error("not available in this build")]
+    NotAvailable,
     /// Posting needs the person to finish a captcha in Reddit's own form
     /// (posting rule 3, SPEC §4.5). `fallback_url` is the reddit.com page to
     /// open in a dialog.

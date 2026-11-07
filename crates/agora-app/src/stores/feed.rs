@@ -8,7 +8,7 @@ use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
 use super::context::error_message;
-use super::{Context, LoadState, PostObject, SubredditObject};
+use super::{Context, LoadState, PostObject, SessionState, SessionStore, SubredditObject};
 
 mod imp {
     use super::*;
@@ -68,15 +68,10 @@ impl FeedStore {
         imp.sort_key.replace(sort.key().into());
         imp.top_range.replace(range.key().into());
         imp.posts.replace(Some(gio::ListStore::new::<PostObject>()));
-        // A feed chosen before sign-in is confirmed loads once it is.
         ctx.session.connect_state_notify(glib::clone!(
             #[weak]
             obj,
-            move |session| {
-                if session.can_request() && obj.posts().n_items() == 0 && obj.state() == LoadState::Idle {
-                    obj.load_more();
-                }
-            }
+            move |session| obj.session_changed(session)
         ));
         imp.ctx.replace(Some(ctx));
         obj
@@ -142,6 +137,31 @@ impl FeedStore {
         self.refresh();
     }
 
+    /// A feed chosen before sign-in is confirmed, or stopped by a block, loads
+    /// once requests may be sent. Signing out forgets the account's posts.
+    fn session_changed(&self, session: &SessionStore) {
+        if session.state() == SessionState::SignedOut {
+            let imp = self.imp();
+            imp.generation.set(imp.generation.get() + 1);
+            imp.after.replace(None);
+            self.posts().remove_all();
+            self.set_state(LoadState::Idle);
+            return;
+        }
+        if !session.can_request() {
+            return;
+        }
+        if self.posts().n_items() == 0 && matches!(self.state(), LoadState::Idle | LoadState::Error) {
+            self.set_state(LoadState::Idle);
+            self.load_more();
+        }
+        if let Some(sub) = self.subreddit()
+            && sub.subreddit().id.is_empty()
+        {
+            self.load_subreddit_info(sub);
+        }
+    }
+
     /// Drops what is loaded and loads the first page again.
     pub fn refresh(&self) {
         let imp = self.imp();
@@ -160,7 +180,10 @@ impl FeedStore {
         }
         let Some(feed) = self.feed() else { return };
         let ctx = self.ctx();
-        if !ctx.session.can_request() && !ctx.mock {
+        if !ctx.session.can_request() {
+            if let Some(reason) = ctx.session.refusal() {
+                self.set_error(&reason);
+            }
             return;
         }
         let request = ListingRequest {
@@ -195,6 +218,9 @@ impl FeedStore {
 
     fn load_subreddit_info(&self, sub: SubredditObject) {
         let ctx = self.ctx();
+        if !ctx.session.can_request() {
+            return;
+        }
         let backend = ctx.backend.clone();
         let name = sub.subreddit().name;
         let weak = self.downgrade();
@@ -209,7 +235,19 @@ impl FeedStore {
                     obj.imp().subreddit.replace(Some(SubredditObject::new(info)));
                     obj.notify_subreddit();
                 }
-                Err(e) => tracing::info!("subreddit_info failed: {e}"),
+                Err(e) => {
+                    let retry = obj.downgrade();
+                    obj.ctx().toast_error(
+                        &e,
+                        Some(Rc::new(move || {
+                            if let Some(store) = retry.upgrade()
+                                && let Some(sub) = store.subreddit()
+                            {
+                                store.load_subreddit_info(sub);
+                            }
+                        })),
+                    );
+                }
             }
         });
     }

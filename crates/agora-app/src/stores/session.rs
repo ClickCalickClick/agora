@@ -1,7 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
-use agora_core::{Backend, BackendEvent};
+use agora_core::{AgoraError, Backend, BackendEvent};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -21,6 +22,8 @@ pub enum SessionState {
     Expired,
     /// Reddit pushed back; requests stop until the back-off ends.
     Blocked,
+    /// The sign-in check failed (network, or Reddit changed); the user can retry.
+    CheckFailed,
 }
 
 mod imp {
@@ -30,6 +33,8 @@ mod imp {
     #[properties(wrapper_type = super::SessionStore)]
     pub struct SessionStore {
         pub backend: RefCell<Option<Rc<dyn Backend>>>,
+        /// Bumped by every block, so only the newest back-off timer acts.
+        pub block_generation: Cell<u64>,
         /// Empty while signed out.
         #[property(get)]
         pub username: RefCell<String>,
@@ -80,9 +85,12 @@ impl SessionStore {
             match result {
                 Ok(Some(name)) => obj.set(SessionState::SignedIn, name.as_str()),
                 Ok(None) => obj.set(SessionState::SignedOut, ""),
-                Err(agora_core::AgoraError::Blocked { .. }) => obj.set(SessionState::Blocked, ""),
-                Err(agora_core::AgoraError::SessionExpired) => obj.set(SessionState::Expired, ""),
-                Err(e) => tracing::warn!("whoami failed: {e}"),
+                Err(AgoraError::Blocked { retry_after }) => obj.enter_blocked(retry_after),
+                Err(AgoraError::SessionExpired) => obj.set(SessionState::Expired, ""),
+                Err(e) => {
+                    tracing::warn!("whoami failed: {e}");
+                    obj.set(SessionState::CheckFailed, "");
+                }
             }
         });
     }
@@ -92,13 +100,43 @@ impl SessionStore {
         self.state() == SessionState::SignedIn
     }
 
+    /// Why requests may not be sent, for the error a page shows. `None` while
+    /// signed in, and while the first check is still running.
+    pub fn refusal(&self) -> Option<AgoraError> {
+        match self.state() {
+            SessionState::Unknown | SessionState::SignedIn => None,
+            SessionState::SignedOut | SessionState::Expired => Some(AgoraError::SessionExpired),
+            SessionState::Blocked => Some(AgoraError::Blocked {
+                retry_after: Duration::ZERO,
+            }),
+            SessionState::CheckFailed => Some(AgoraError::Network(String::new())),
+        }
+    }
+
     fn handle(&self, event: BackendEvent) {
         match event {
             BackendEvent::SignedIn(name) => self.set(SessionState::SignedIn, name.as_str()),
             BackendEvent::SignedOut => self.set(SessionState::SignedOut, ""),
             BackendEvent::SessionExpired => self.set(SessionState::Expired, ""),
-            BackendEvent::Blocked { .. } => self.set(SessionState::Blocked, &self.username()),
+            BackendEvent::Blocked { retry_after } => self.enter_blocked(retry_after),
         }
+    }
+
+    /// Stops requests, and checks the session again when the back-off ends
+    /// (SPEC §4.6). The check is the only thing that leaves `Blocked`.
+    fn enter_blocked(&self, retry_after: Duration) {
+        let imp = self.imp();
+        imp.block_generation.set(imp.block_generation.get() + 1);
+        let generation = imp.block_generation.get();
+        self.set(SessionState::Blocked, &self.username());
+        let weak = self.downgrade();
+        glib::spawn_future_local(async move {
+            glib::timeout_future(retry_after).await;
+            let Some(obj) = weak.upgrade() else { return };
+            if obj.imp().block_generation.get() == generation && obj.state() == SessionState::Blocked {
+                obj.check();
+            }
+        });
     }
 
     fn set(&self, state: SessionState, username: &str) {
@@ -111,5 +149,50 @@ impl SessionStore {
             imp.state.set(state);
             self.notify_state();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use agora_core::MockBackend;
+    use agora_core::mock::FailureScript;
+
+    use super::*;
+    use crate::stores::test_util::{context, run_until, with_main_context};
+
+    #[test]
+    fn failed_check_is_visible_and_not_stuck_in_unknown() {
+        with_main_context(|| {
+            let ctx = context(
+                MockBackend::new()
+                    .with_failures(FailureScript::default().fail("whoami", AgoraError::Network("x".into()))),
+            );
+            assert_eq!(ctx.session.state(), SessionState::CheckFailed);
+            assert!(!ctx.session.can_request());
+            assert!(ctx.session.refusal().is_some());
+        })
+    }
+
+    #[test]
+    fn blocked_ends_with_a_new_check_after_the_backoff() {
+        with_main_context(|| {
+            let blocked = AgoraError::Blocked {
+                retry_after: Duration::from_millis(20),
+            };
+            let ctx = context(MockBackend::new().with_failures(FailureScript::default().fail("listing", blocked)));
+            assert!(ctx.session.can_request());
+            let request = agora_core::ListingRequest {
+                feed: agora_core::Feed::Home,
+                sort: agora_core::Sort::Best,
+                after: None,
+            };
+            let fut = ctx.backend.listing(request);
+            glib::spawn_future_local(async move {
+                let _ = fut.await;
+            });
+            run_until(|| ctx.session.state() == SessionState::Blocked);
+            assert!(!ctx.session.can_request());
+            run_until(|| ctx.session.state() == SessionState::SignedIn);
+        })
     }
 }

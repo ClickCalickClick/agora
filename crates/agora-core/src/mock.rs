@@ -607,11 +607,11 @@ impl Backend for MockBackend {
         })
     }
 
-    fn subscribe(&self, subreddit: Subreddit, subscribed: bool) -> BackendFuture<()> {
+    fn subscribe(&self, subreddit_id: String, subscribed: bool) -> BackendFuture<()> {
         self.op("subscribe", move |s| {
             s.subreddits
                 .iter_mut()
-                .find(|r| r.name.eq_ignore_case(&subreddit.name))
+                .find(|r| r.id == subreddit_id)
                 .ok_or(AgoraError::NotFound)?
                 .subscribed = subscribed;
             Ok(())
@@ -676,6 +676,7 @@ impl Backend for MockBackend {
                 }
             };
             let comment = Comment {
+                permalink: format!("/comments/{}/_/{}/", post_id.as_str(), id.as_str()),
                 id,
                 post_id: post_id.clone(),
                 parent: parent_id.clone(),

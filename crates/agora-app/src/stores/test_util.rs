@@ -6,11 +6,20 @@ use std::time::{Duration, Instant};
 use agora_core::MockBackend;
 use gtk::{gio, glib};
 
-use super::Context;
+use super::{Context, SessionState};
 
-/// A mock context. Settings use the memory backend and the schema `build.rs`
-/// compiled, so tests never touch the user's dconf.
+/// A mock context with the session check finished. Call inside
+/// [`with_main_context`].
 pub fn context(backend: MockBackend) -> Rc<Context> {
+    let ctx = unchecked_context(backend);
+    ctx.session.check();
+    run_until(|| ctx.session.state() != SessionState::Unknown);
+    ctx
+}
+
+/// A mock context with no session check yet. Settings use the memory backend
+/// and the schema `build.rs` compiled, so tests never touch the user's dconf.
+pub fn unchecked_context(backend: MockBackend) -> Rc<Context> {
     // SAFETY: set before any GSettings use in this test process; tests that
     // race here all write the same values.
     unsafe {

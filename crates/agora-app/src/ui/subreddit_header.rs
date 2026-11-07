@@ -110,7 +110,9 @@ impl SubredditHeader {
         imp.description.set_label(sub.description.as_deref().unwrap_or(""));
         imp.description
             .set_visible(sub.description.as_ref().is_some_and(|d| !d.is_empty()));
-        imp.join.set_action_target_value(Some(&sub.name.as_str().to_variant()));
+        // Until `subreddit_info` loads, neither the id Reddit needs nor the
+        // real membership is known.
+        imp.join.set_visible(!sub.id.is_empty());
         let handler = obj.connect_subscribed_notify(glib::clone!(
             #[weak(rename_to = header)]
             self,

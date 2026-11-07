@@ -4,6 +4,7 @@ use super::*;
 
 fn first_thread(backend: &MockBackend, post: &str) -> Vec<CommentNode> {
     block_on(backend.post_with_comments(ThreadRequest {
+        subreddit: SubredditName::new("gnome"),
         post: PostId::new(post),
         sort: CommentSort::Best,
         focus: None,
@@ -93,6 +94,7 @@ fn continue_thread_focuses_comment() {
     });
     let target = target.unwrap();
     let (_, focused) = block_on(b.post_with_comments(ThreadRequest {
+        subreddit: SubredditName::new("gnome"),
         post: PostId::new("t3_showcase7"),
         sort: CommentSort::Best,
         focus: Some(target.clone()),
@@ -113,6 +115,7 @@ fn vote_changes_score_once() {
     let id = PostId::new("t3_showcase1");
     let score = |b: &MockBackend| {
         block_on(b.post_with_comments(ThreadRequest {
+            subreddit: SubredditName::new("gnome"),
             post: id.clone(),
             sort: CommentSort::Best,
             focus: None,
@@ -166,6 +169,7 @@ fn load_more_never_repeats_comments() {
         let b = MockBackend::new();
         let post = PostId::new("t3_showcase7");
         let nodes = block_on(b.post_with_comments(ThreadRequest {
+            subreddit: SubredditName::new("gnome"),
             post: post.clone(),
             sort,
             focus: None,

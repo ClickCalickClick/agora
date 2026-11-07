@@ -5,7 +5,7 @@ use std::rc::Rc;
 use agora_core::{Thing, VoteState};
 use gtk::glib;
 
-use super::{CommentObject, Context, PostObject, vote_to_int};
+use super::{CommentObject, Context, PostObject, SubredditObject, vote_to_int};
 
 /// Optimistic writes: the object changes at once and reverts, with an error
 /// toast, if Reddit's response is an error (SPEC §4.5).
@@ -37,11 +37,42 @@ impl Writes {
     }
 
     fn claim(&self, kind: &str, id: &str) -> Option<Busy> {
+        // The banner already says why nothing is being sent.
+        if !self.ctx.session.can_request() {
+            return None;
+        }
         let key = format!("{kind}:{id}");
         self.busy
             .borrow_mut()
             .insert(key.clone())
             .then(|| Busy(self.busy.clone(), key))
+    }
+
+    /// Joins or leaves a subreddit; `on_success` runs once Reddit confirmed it.
+    /// Does nothing until the subreddit's id has loaded.
+    pub fn toggle_subscribe(&self, sub: &SubredditObject, on_success: impl FnOnce() + 'static) {
+        let id = sub.subreddit().id;
+        if id.is_empty() {
+            return;
+        }
+        let Some(busy) = self.claim("subscribe", &id) else {
+            return;
+        };
+        let subscribed = !sub.subscribed();
+        sub.set_subscribed(subscribed);
+        let fut = self.ctx.backend.subscribe(id, subscribed);
+        let (ctx, sub) = (self.ctx.clone(), sub.clone());
+        glib::spawn_future_local(async move {
+            let result = fut.await;
+            drop(busy);
+            match result {
+                Ok(()) => on_success(),
+                Err(e) => {
+                    sub.set_subscribed(!subscribed);
+                    ctx.toast_error(&e, None);
+                }
+            }
+        });
     }
 
     /// Votes on a post; voting the current vote again clears it.
@@ -131,5 +162,54 @@ impl Writes {
                 ctx.toast_error(&e, None);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use agora_core::{MockBackend, Subreddit, SubredditName};
+
+    use super::*;
+    use crate::stores::test_util::{context, run_until, unchecked_context, with_main_context};
+
+    fn named(id: &str) -> SubredditObject {
+        SubredditObject::new(Subreddit {
+            id: id.into(),
+            ..Subreddit::from_name(SubredditName::new("x"))
+        })
+    }
+
+    #[test]
+    fn join_before_details_load_sends_nothing() {
+        with_main_context(|| {
+            let writes = Writes::new(context(MockBackend::new()));
+            let sub = named("");
+            writes.toggle_subscribe(&sub, || panic!("nothing was sent"));
+            assert!(!sub.subscribed());
+        })
+    }
+
+    #[test]
+    fn writes_wait_for_sign_in() {
+        with_main_context(|| {
+            let writes = Writes::new(unchecked_context(MockBackend::new()));
+            let sub = named("t5_mock0");
+            writes.toggle_subscribe(&sub, || panic!("nothing was sent"));
+            assert!(!sub.subscribed());
+        })
+    }
+
+    #[test]
+    fn a_second_press_while_pending_is_ignored() {
+        with_main_context(|| {
+            let writes = Writes::new(context(MockBackend::new()));
+            let sub = named("t5_mock0");
+            let done = std::rc::Rc::new(std::cell::Cell::new(false));
+            let flag = done.clone();
+            writes.toggle_subscribe(&sub, move || flag.set(true));
+            writes.toggle_subscribe(&sub, || panic!("the second press was sent"));
+            assert!(sub.subscribed());
+            run_until(|| done.get());
+        })
     }
 }

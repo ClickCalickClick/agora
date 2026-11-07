@@ -39,6 +39,7 @@ mod imp {
         pub feed: OnceCell<FeedStore>,
         pub thread: OnceCell<ThreadStore>,
         pub subscriptions: OnceCell<SubscriptionsStore>,
+        pub writes: OnceCell<Writes>,
         pub zoom_css: OnceCell<gtk::CssProvider>,
         pub banner_action: RefCell<Option<Rc<dyn Fn()>>>,
     }
@@ -163,7 +164,8 @@ impl AgoraWindow {
         let _ = imp.ctx.set(ctx.clone());
         let _ = imp.feed.set(feed);
         let _ = imp.thread.set(thread);
-        let _ = imp.subscriptions.set(subscriptions.clone());
+        let _ = imp.subscriptions.set(subscriptions);
+        let _ = imp.writes.set(writes);
 
         self.setup_actions();
         self.setup_zoom();
@@ -176,7 +178,6 @@ impl AgoraWindow {
         ));
         self.update_banner();
         ctx.session.check();
-        subscriptions.refresh();
 
         let default_feed = if s.string("default-feed") == "popular" {
             Feed::Popular
@@ -191,7 +192,10 @@ impl AgoraWindow {
         if ctx.mock
             && let Ok(id) = std::env::var("AGORA_DEV_OPEN")
         {
-            imp.thread.get().unwrap().open_id(agora_core::PostId::new(id));
+            imp.thread
+                .get()
+                .unwrap()
+                .open_id(SubredditName::new("gnome"), agora_core::PostId::new(id));
             imp.inner.set_show_content(true);
         }
     }
@@ -223,7 +227,6 @@ impl AgoraWindow {
                 .build()
         };
         let subscribe = gio::ActionEntry::builder("toggle-subscribe")
-            .parameter_type(Some(glib::VariantTy::STRING))
             .activate(|win: &Self, _, _| win.toggle_subscribe())
             .build();
         self.add_action_entries([
@@ -272,7 +275,7 @@ impl AgoraWindow {
                     return glib::Propagation::Proceed;
                 }
                 if gtk::prelude::GtkWindowExt::focus(&win)
-                    .is_some_and(|w| w.is::<gtk::Text>() || w.is::<gtk::TextView>())
+                    .is_some_and(|w| w.is::<gtk::Editable>() || w.is::<gtk::TextView>())
                 {
                     return glib::Propagation::Proceed;
                 }
@@ -415,21 +418,11 @@ impl AgoraWindow {
         let Some(sub) = imp.feed.get().unwrap().subreddit() else {
             return;
         };
-        let subscribed = !sub.subscribed();
-        sub.set_subscribed(subscribed);
-        let fut = self.ctx().backend.subscribe(sub.subreddit(), subscribed);
-        let win = self.downgrade();
-        glib::spawn_future_local(async move {
-            let result = fut.await;
-            let Some(win) = win.upgrade() else { return };
-            match result {
-                Ok(()) => win.imp().subscriptions.get().unwrap().refresh(),
-                Err(e) => {
-                    sub.set_subscribed(!subscribed);
-                    win.ctx().toast_error(&e, None);
-                }
-            }
-        });
+        let subscriptions = imp.subscriptions.get().unwrap().clone();
+        imp.writes
+            .get()
+            .unwrap()
+            .toggle_subscribe(&sub, move || subscriptions.refresh());
     }
 
     fn update_banner(&self) {
@@ -437,6 +430,14 @@ impl AgoraWindow {
         let ctx = self.ctx();
         let (title, button, action): (String, Option<String>, Option<BannerAction>) = match ctx.session.state() {
             SessionState::Expired => (gettext("Signed out of Reddit"), None, None),
+            SessionState::CheckFailed => (
+                gettext("Could not check your Reddit sign-in"),
+                Some(gettext("_Retry")),
+                Some(Rc::new({
+                    let session = ctx.session.clone();
+                    move || session.check()
+                })),
+            ),
             SessionState::Blocked => (
                 gettext("Reddit asked Agora to slow down. Agora will wait before trying again."),
                 None,

@@ -121,6 +121,7 @@ impl AgoraApplication {
         self.set_accels_for_action("window.close", &["<Control>w"]);
         self.set_accels_for_action("win.toggle-sidebar", &["F9"]);
         self.set_accels_for_action("win.refresh", &["F5", "<Control>r"]);
+        self.set_accels_for_action("win.back", &["<Alt>Left"]);
         self.set_accels_for_action("win.zoom-in", &["<Control>plus", "<Control>equal", "<Control>KP_Add"]);
         self.set_accels_for_action("win.zoom-out", &["<Control>minus", "<Control>KP_Subtract"]);
         self.set_accels_for_action("win.zoom-reset", &["<Control>0", "<Control>KP_0"]);
@@ -143,6 +144,7 @@ impl AgoraApplication {
             .website(config::REPO_URL)
             .issue_url(format!("{}/issues", config::REPO_URL))
             .license_type(gtk::License::Gpl30)
+            .translator_credits(gettext("translator-credits"))
             .comments(gettext("An unofficial client for browsing and discussing Reddit"))
             .build();
         about.add_acknowledgement_section(

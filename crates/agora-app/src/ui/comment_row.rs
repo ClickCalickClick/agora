@@ -102,10 +102,10 @@ pub fn accessible_text(row: &CommentObject) -> String {
                     .author
                     .as_ref()
                     .map_or_else(|| gettext("deleted account"), |a| a.prefixed());
-                let mut parts = vec![if c.depth == 0 {
+                let mut parts = vec![if row.depth() == 0 {
                     i18n_f("Comment by {}", &[&author])
                 } else {
-                    i18n_f("Level {} reply by {}", &[&(c.depth + 1).to_string(), &author])
+                    i18n_f("Level {} reply by {}", &[&(row.depth() + 1).to_string(), &author])
                 }];
                 if !row.score_hidden() {
                     parts.push(util::spoken_points(row.score()));

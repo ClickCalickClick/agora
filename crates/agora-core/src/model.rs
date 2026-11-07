@@ -210,6 +210,8 @@ pub struct Comment {
     pub id: CommentId,
     /// The post it belongs to.
     pub post_id: PostId,
+    /// Path on reddit.com. Empty when Reddit did not give one.
+    pub permalink: String,
     /// `None` for a top-level comment.
     pub parent: Option<CommentId>,
     /// `None` when deleted.
@@ -232,7 +234,8 @@ pub struct Comment {
     pub edited: bool,
     /// Deleted or removed.
     pub state: CommentState,
-    /// Depth in the thread, 0 for top-level comments.
+    /// Absolute depth in the thread, 0 for top-level comments. Stores rebase it
+    /// for a focused branch.
     pub depth: u32,
 }
 

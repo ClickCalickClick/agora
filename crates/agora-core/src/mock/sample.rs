@@ -614,6 +614,7 @@ fn gen_tree(
     };
     let is_submitter = author.is_some() && author == post.author;
     let mut comment = Comment {
+        permalink: format!("{}{}/", post.permalink, id.as_str()),
         id: id.clone(),
         post_id: post.id.clone(),
         parent: parent.cloned(),

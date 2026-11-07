@@ -74,6 +74,7 @@ pub fn error_message(error: &AgoraError) -> String {
         AgoraError::Parse(_) => gettext("Could not read Reddit's reply"),
         AgoraError::Io(_) => gettext("Could not save a file"),
         AgoraError::Cancelled => String::new(),
+        AgoraError::NotAvailable => gettext("Voting, saving and joining arrive in a later build"),
         AgoraError::ChallengeRequired { .. } => gettext("Reddit wants to check that you are a person"),
     }
 }
