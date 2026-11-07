@@ -86,9 +86,8 @@ impl AgoraSidebar {
         subs.bind_model(Some(&subscriptions.list()), |obj| {
             let sub = obj.downcast_ref::<SubredditObject>().unwrap().subreddit();
             let item = adw::SidebarItem::builder().title(sub.name.prefixed()).build();
-            if let Some(title) = sub.title.filter(|t| !t.is_empty()) {
-                item.set_tooltip(Some(&title));
-            }
+            // No tooltip: AdwSidebar uses it as the accessible name, which
+            // would read the display title instead of "r/name".
             item
         });
         imp.sidebar.append(subs);

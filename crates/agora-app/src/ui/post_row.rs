@@ -25,8 +25,11 @@ mod imp {
         pub score: TemplateChild<gtk::Label>,
         #[template_child]
         pub comments: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub trailing: TemplateChild<gtk::Box>,
         pub post: RefCell<Option<PostObject>>,
         pub handlers: RefCell<Vec<glib::SignalHandlerId>>,
+        pub item: glib::WeakRef<gtk::ListItem>,
     }
 
     #[glib::object_subclass]
@@ -44,7 +47,14 @@ mod imp {
         }
     }
 
-    impl ObjectImpl for AgoraPostRow {}
+    impl ObjectImpl for AgoraPostRow {
+        fn constructed(&self) {
+            self.parent_constructed();
+            // Score and comment count are in the row's description; the bare
+            // numbers would be read without units.
+            self.trailing.update_state(&[gtk::accessible::State::Hidden(true)]);
+        }
+    }
     impl WidgetImpl for AgoraPostRow {}
     impl BoxImpl for AgoraPostRow {}
 }
@@ -104,9 +114,10 @@ pub fn meta_line(post: &Post, show_subreddit: bool, show_author: bool) -> String
 
 impl AgoraPostRow {
     /// Shows `post`. `show_subreddit` is false inside a subreddit feed.
-    pub fn bind(&self, post: &PostObject, show_subreddit: bool, show_scores: bool) {
+    pub fn bind(&self, item: &gtk::ListItem, post: &PostObject, show_subreddit: bool, show_scores: bool) {
         self.unbind();
         let imp = self.imp();
+        imp.item.set(Some(item));
         post.with(|p| {
             imp.title.set_label(&p.title);
             imp.meta.set_label(&meta_line(p, show_subreddit, true));
@@ -200,9 +211,12 @@ impl AgoraPostRow {
             parts.join(", ")
         });
         let label = post.with(|p| p.title.clone());
-        self.update_property(&[
-            gtk::accessible::Property::Label(&label),
-            gtk::accessible::Property::Description(&description),
-        ]);
+        // Screen readers focus the list item, so the label and description
+        // go there. Setting them on the row widget during bind made GTK 4.24
+        // log criticals and drop rows from the accessibility tree.
+        if let Some(item) = self.imp().item.upgrade() {
+            item.set_accessible_label(&label);
+            item.set_accessible_description(&description);
+        }
     }
 }

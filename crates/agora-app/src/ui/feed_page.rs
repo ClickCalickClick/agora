@@ -168,10 +168,20 @@ impl AgoraFeedPage {
                 }
             }
         ));
+        // update() may add or remove the footer, which changes the flattened
+        // model; doing that inside the posts' own items-changed emission left
+        // the list view's rows inconsistent (GTK criticals, rows missing from
+        // the accessibility tree). Run it after the emission instead.
         store.posts().connect_items_changed(glib::clone!(
             #[weak(rename_to = page)]
             self,
-            move |_, _, _, _| page.update()
+            move |_, _, _, _| {
+                glib::idle_add_local_once(glib::clone!(
+                    #[weak]
+                    page,
+                    move || page.update()
+                ));
+            }
         ));
         // Infinite scroll, driven by the user's scrolling only: nothing loads
         // ahead unless the user is near the end (no prefetch).
@@ -242,8 +252,7 @@ impl AgoraFeedPage {
                     item.set_activatable(true);
                     item.set_selectable(true);
                     let in_sub = matches!(store.feed(), Some(Feed::Subreddit(_)));
-                    row.bind(post, !in_sub, settings.boolean("show-scores"));
-                    post.with(|p| item.set_accessible_label(&p.title));
+                    row.bind(item, post, !in_sub, settings.boolean("show-scores"));
                 } else if let Some(sub) = obj.and_downcast_ref::<SubredditObject>() {
                     let header = item.child().and_downcast::<SubredditHeader>().unwrap_or_else(|| {
                         let h = SubredditHeader::default();
