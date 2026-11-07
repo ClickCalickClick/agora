@@ -7,6 +7,8 @@ use agora_core::{Feed, SubredditName, Username};
 use gettextrs::gettext;
 use gtk::{gio, glib};
 
+use super::sign_in::AgoraSignIn;
+use super::welcome::AgoraWelcome;
 use super::{AgoraFeedPage, AgoraPostPage, AgoraSidebar};
 use crate::render::LinkHandler;
 use crate::stores::{Context, FeedStore, PostObject, SessionState, SubscriptionsStore, ThreadStore, Writes};
@@ -25,6 +27,8 @@ mod imp {
         pub toasts: TemplateChild<adw::ToastOverlay>,
         #[template_child]
         pub banner: TemplateChild<adw::Banner>,
+        #[template_child]
+        pub content_stack: TemplateChild<gtk::Stack>,
         #[template_child]
         pub outer: TemplateChild<adw::OverlaySplitView>,
         #[template_child]
@@ -174,10 +178,25 @@ impl AgoraWindow {
         ctx.session.connect_state_notify(glib::clone!(
             #[weak(rename_to = win)]
             self,
-            move |_| win.update_banner()
+            move |_| win.session_changed()
         ));
-        self.update_banner();
-        ctx.session.check();
+        gio::NetworkMonitor::default().connect_network_available_notify(glib::clone!(
+            #[weak(rename_to = win)]
+            self,
+            move |monitor| win.network_changed(monitor)
+        ));
+        self.session_changed();
+
+        // Nothing reaches Reddit before the risk acknowledgement (SPEC §6).
+        if ctx.settings.boolean("risk-acknowledged") || (ctx.mock && std::env::var_os("AGORA_MOCK_WELCOME").is_none()) {
+            ctx.session.check();
+        } else {
+            glib::idle_add_local_once(glib::clone!(
+                #[weak(rename_to = win)]
+                self,
+                move || win.show_welcome()
+            ));
+        }
 
         let default_feed = if s.string("default-feed") == "popular" {
             Feed::Popular
@@ -214,6 +233,12 @@ impl AgoraWindow {
                 }
             })
             .build();
+        let sign_in = gio::ActionEntry::builder("sign-in")
+            .activate(|win: &Self, _, _| win.sign_in())
+            .build();
+        let sign_out = gio::ActionEntry::builder("sign-out")
+            .activate(|win: &Self, _, _| win.confirm_sign_out())
+            .build();
         let back = gio::ActionEntry::builder("back")
             .activate(|win: &Self, _, _| win.go_back())
             .build();
@@ -230,6 +255,8 @@ impl AgoraWindow {
             .activate(|win: &Self, _, _| win.toggle_subscribe())
             .build();
         self.add_action_entries([
+            sign_in,
+            sign_out,
             subscribe,
             refresh,
             back,
@@ -425,11 +452,106 @@ impl AgoraWindow {
             .toggle_subscribe(&sub, move || subscriptions.refresh());
     }
 
+    fn show_welcome(&self) {
+        let win = self.downgrade();
+        let welcome = AgoraWelcome::new(self.ctx().clone(), move || {
+            if let Some(win) = win.upgrade() {
+                win.show_sign_in();
+            }
+        });
+        welcome.present(Some(self));
+    }
+
+    /// Sign In from the status page or the banner. Before the risk
+    /// acknowledgement that means the Welcome dialog.
+    fn sign_in(&self) {
+        let ctx = self.ctx();
+        if !ctx.settings.boolean("risk-acknowledged") && !ctx.mock {
+            self.show_welcome();
+        } else {
+            self.show_sign_in();
+        }
+    }
+
+    fn show_sign_in(&self) {
+        let ctx = self.ctx();
+        let Some(view) = ctx.sign_in_view.as_ref() else {
+            return;
+        };
+        AgoraSignIn::new(ctx.session.clone(), view).present(Some(self));
+    }
+
+    fn confirm_sign_out(&self) {
+        let dialog = adw::AlertDialog::new(
+            Some(&gettext("Sign Out?")),
+            Some(&gettext(
+                "This clears your Reddit session and Agora's saved data from this computer.",
+            )),
+        );
+        dialog.add_response("cancel", &gettext("_Cancel"));
+        dialog.add_response("sign-out", &gettext("_Sign Out"));
+        dialog.set_response_appearance("sign-out", adw::ResponseAppearance::Destructive);
+        dialog.set_close_response("cancel");
+        dialog.set_default_response(Some("cancel"));
+        let win = self.downgrade();
+        dialog.connect_response(None, move |_, response| {
+            if response != "sign-out" {
+                return;
+            }
+            let Some(win) = win.upgrade() else { return };
+            let ctx = win.ctx().clone();
+            let toasts = ctx.clone();
+            ctx.session.sign_out(move |e| toasts.toast_error(&e, None));
+        });
+        dialog.present(Some(self));
+    }
+
+    fn session_changed(&self) {
+        let imp = self.imp();
+        let ctx = self.ctx();
+        let session = &ctx.session;
+        let needs_sign_in = match session.state() {
+            SessionState::SignedOut => true,
+            // Nothing has been asked yet, because the risk is not acknowledged.
+            SessionState::Unknown => !ctx.mock && !ctx.settings.boolean("risk-acknowledged"),
+            _ => false,
+        };
+        imp.content_stack
+            .set_visible_child_name(if needs_sign_in { "sign-in" } else { "main" });
+        imp.sidebar.set_account(&session.username());
+        self.update_banner();
+    }
+
+    fn network_changed(&self, monitor: &gio::NetworkMonitor) {
+        if monitor.is_network_available() && self.ctx().session.state() == SessionState::CheckFailed {
+            self.ctx().session.check();
+        }
+        self.update_banner();
+    }
+
     fn update_banner(&self) {
         let imp = self.imp();
         let ctx = self.ctx();
+        if !ctx.mock && !gio::NetworkMonitor::default().is_network_available() {
+            imp.banner.set_title(&gettext("You're offline"));
+            imp.banner.set_button_label(None);
+            imp.banner_action.replace(None);
+            imp.banner.set_revealed(true);
+            return;
+        }
         let (title, button, action): (String, Option<String>, Option<BannerAction>) = match ctx.session.state() {
-            SessionState::Expired => (gettext("Signed out of Reddit"), None, None),
+            SessionState::Expired => (
+                gettext("Signed out of Reddit"),
+                Some(gettext("_Sign In")),
+                Some(Rc::new({
+                    let win = self.downgrade();
+                    move || {
+                        if let Some(win) = win.upgrade() {
+                            win.show_sign_in();
+                        }
+                    }
+                })),
+            ),
             SessionState::CheckFailed => (
                 gettext("Could not check your Reddit sign-in"),
                 Some(gettext("_Retry")),
@@ -444,7 +566,7 @@ impl AgoraWindow {
                 None,
             ),
             _ if ctx.mock => (
-                gettext("Showing sample data. Signing in to Reddit arrives in a later build."),
+                gettext("Showing sample data, not your Reddit account"),
                 Some(gettext("_About")),
                 Some(Rc::new({
                     let win = self.downgrade();

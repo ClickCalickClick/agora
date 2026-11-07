@@ -4,6 +4,7 @@ mod application;
 mod config;
 mod i18n;
 mod render;
+mod services;
 mod stores;
 mod ui;
 mod util;
@@ -39,5 +40,15 @@ fn main() -> glib::ExitCode {
     gio::resources_register_include!("agora.gresource").expect("could not register resources");
     glib::set_application_name("Agora");
 
-    AgoraApplication::new().run()
+    let app = AgoraApplication::new();
+    // `--self-test` is read by `activate`; GApplication must not reject it.
+    app.add_main_option(
+        "self-test",
+        glib::Char::from(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Check each Reddit operation once and report which ones broke",
+        None,
+    );
+    app.run()
 }

@@ -6,7 +6,9 @@ mod post_header;
 mod post_page;
 mod post_row;
 mod sidebar;
+mod sign_in;
 mod subreddit_header;
+mod welcome;
 mod window;
 
 use gtk::glib;

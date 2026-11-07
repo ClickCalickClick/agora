@@ -6,11 +6,13 @@ use adw::prelude::*;
 use adw::subclass::prelude::*;
 use agora_core::Backend;
 use agora_core::mock::{FailureScript, MockBackend};
+use agora_reddit_web::{Config, RedditWebBackend};
 use gettextrs::gettext;
 use gtk::{gio, glib};
 
 use crate::config;
-use crate::stores::Context;
+use crate::services::LocalData;
+use crate::stores::{Context, SignInView};
 use crate::ui::AgoraWindow;
 
 mod imp {
@@ -19,6 +21,7 @@ mod imp {
     #[derive(Default)]
     pub struct AgoraApplication {
         pub ctx: RefCell<Option<Rc<Context>>>,
+        pub reddit: RefCell<Option<RedditWebBackend>>,
     }
 
     #[glib::object_subclass]
@@ -40,6 +43,10 @@ mod imp {
 
         fn activate(&self) {
             let app = self.obj();
+            if std::env::args().any(|a| a == "--self-test") {
+                app.run_self_test();
+                return;
+            }
             if let Some(window) = app.active_window() {
                 window.present();
                 return;
@@ -66,7 +73,17 @@ impl AgoraApplication {
         glib::Object::builder()
             .property("application-id", config::APP_ID)
             .property("resource-base-path", config::RESOURCE_BASE)
+            .property("flags", Self::flags())
             .build()
+    }
+
+    fn flags() -> gio::ApplicationFlags {
+        // The self-test prints in its own process rather than the running app.
+        if std::env::args().any(|a| a == "--self-test") {
+            gio::ApplicationFlags::NON_UNIQUE
+        } else {
+            gio::ApplicationFlags::FLAGS_NONE
+        }
     }
 
     /// The shared context, created on first use.
@@ -75,8 +92,31 @@ impl AgoraApplication {
             return ctx;
         }
         let settings = gio::Settings::new(config::SCHEMA_ID);
-        // Slice 1 has no real backend yet: sample data is used either way, and
-        // the window says so unless AGORA_MOCK=1 asked for it (SPEC §19).
+        let ctx = if std::env::var_os("AGORA_MOCK").is_some_and(|v| v != "0") {
+            Self::mock_context(settings)
+        } else {
+            self.reddit_context(settings)
+        };
+        self.imp().ctx.replace(Some(ctx.clone()));
+        ctx
+    }
+
+    /// The real backend. Creating it sends nothing (SPEC §6).
+    fn reddit_context(&self, settings: gio::Settings) -> Rc<Context> {
+        let reddit = RedditWebBackend::new(Config::reddit());
+        self.imp().reddit.replace(Some(reddit.clone()));
+        let path = glib::user_data_dir().join("agora").join("agora.db");
+        let local = LocalData::open(&path)
+            .inspect_err(|e| tracing::warn!("could not open {}: {e}", path.display()))
+            .ok();
+        let login = reddit.clone();
+        let sign_in: SignInView = Rc::new(move |on_navigated| login.login_view(on_navigated));
+        Context::with_services(Rc::new(reddit), settings, false, Some(sign_in), local)
+    }
+
+    /// `AGORA_MOCK=1`: sample data (SPEC §19). `AGORA_MOCK_SIGNED_OUT=1` starts
+    /// signed out, and the sign-in page is one button.
+    fn mock_context(settings: gio::Settings) -> Rc<Context> {
         let mut mock = MockBackend::new().with_now(crate::util::now());
         if let Ok(spec) = std::env::var("AGORA_MOCK_FAIL") {
             mock = mock.with_failures(FailureScript::from_spec(&spec));
@@ -89,10 +129,65 @@ impl AgoraApplication {
             Rc::new(|d: Duration| Box::pin(glib::timeout_future(d)) as futures::future::LocalBoxFuture<'static, ()>),
             Duration::from_millis(latency),
         );
-        let backend: Rc<dyn Backend> = Rc::new(mock);
-        let ctx = Context::new(backend, settings, true);
-        self.imp().ctx.replace(Some(ctx.clone()));
-        ctx
+        let mock = Rc::new(mock);
+        if std::env::var_os("AGORA_MOCK_SIGNED_OUT").is_some() {
+            mock.set_signed_in(false);
+        }
+        let signer = mock.clone();
+        let sign_in: SignInView = Rc::new(move |on_navigated| {
+            let button = gtk::Button::builder()
+                .label("Sign In (sample data)")
+                .halign(gtk::Align::Center)
+                .valign(gtk::Align::Center)
+                .build();
+            let signer = signer.clone();
+            button.connect_clicked(move |_| {
+                signer.set_signed_in(true);
+                on_navigated();
+            });
+            button.upcast()
+        });
+        let backend: Rc<dyn Backend> = mock;
+        Context::with_services(backend, settings, true, Some(sign_in), None)
+    }
+
+    /// `agora --self-test` (SPEC §4.5): runs every read once and prints a line
+    /// per operation. Exits with status 1 if any failed.
+    fn run_self_test(&self) {
+        let ctx = self.context();
+        let reddit = self.imp().reddit.borrow().clone();
+        let guard = self.hold();
+        let app = self.clone();
+        glib::spawn_future_local(async move {
+            let code = match reddit {
+                None => {
+                    println!("The self-test needs real Reddit; unset AGORA_MOCK.");
+                    1
+                }
+                Some(_) if !ctx.settings.boolean("risk-acknowledged") => {
+                    println!("Open Agora once and accept the risk notice first.");
+                    1
+                }
+                Some(reddit) => {
+                    let mut failed = false;
+                    for line in reddit.self_test().await {
+                        match line.result {
+                            Ok(note) => println!("ok    {:<24} {note}", line.operation),
+                            Err(error) => {
+                                failed = true;
+                                println!("FAIL  {:<24} {error}", line.operation);
+                            }
+                        }
+                    }
+                    i32::from(failed)
+                }
+            };
+            drop(guard);
+            app.quit();
+            if code != 0 {
+                std::process::exit(code);
+            }
+        });
     }
 
     fn setup_actions(&self) {

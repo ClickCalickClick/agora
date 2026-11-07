@@ -31,28 +31,63 @@ template $AgoraWindow: Adw.ApplicationWindow {
         button-clicked => $on_banner_button() swapped;
       }
 
-      Adw.OverlaySplitView outer {
+      Gtk.Stack content_stack {
         vexpand: true;
-        min-sidebar-width: 220;
-        max-sidebar-width: 280;
-        sidebar-width-fraction: 0.2;
+        transition-type: crossfade;
 
-        sidebar: Adw.NavigationPage {
-          title: _("Agora");
-          tag: "sidebar";
+        Gtk.StackPage {
+          name: "main";
 
-          child: $AgoraSidebar sidebar {};
-        };
+          child: Adw.OverlaySplitView outer {
+            min-sidebar-width: 220;
+            max-sidebar-width: 280;
+            sidebar-width-fraction: 0.2;
 
-        content: Adw.NavigationSplitView inner {
-          min-sidebar-width: 340;
-          max-sidebar-width: 460;
-          sidebar-width-fraction: 0.4;
+            sidebar: Adw.NavigationPage {
+              title: _("Agora");
+              tag: "sidebar";
 
-          sidebar: $AgoraFeedPage feed_page {};
+              child: $AgoraSidebar sidebar {};
+            };
 
-          content: $AgoraPostPage post_page {};
-        };
+            content: Adw.NavigationSplitView inner {
+              min-sidebar-width: 340;
+              max-sidebar-width: 460;
+              sidebar-width-fraction: 0.4;
+
+              sidebar: $AgoraFeedPage feed_page {};
+
+              content: $AgoraPostPage post_page {};
+            };
+          };
+        }
+
+        Gtk.StackPage {
+          name: "sign-in";
+
+          child: Adw.ToolbarView {
+            [top]
+            Adw.HeaderBar {}
+
+            content: Adw.StatusPage {
+              icon-name: "avatar-default-symbolic";
+              title: _("Sign In to Reddit");
+              description: _("Agora shows Reddit through your own account");
+
+              child: Gtk.Button {
+                halign: center;
+                label: _("_Sign In");
+                use-underline: true;
+                action-name: "win.sign-in";
+
+                styles [
+                  "pill",
+                  "suggested-action",
+                ]
+              };
+            };
+          };
+        }
       }
     }
   };

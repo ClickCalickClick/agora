@@ -6,8 +6,13 @@ use gettextrs::gettext;
 use gtk::gio;
 
 use super::SessionStore;
+use crate::services::LocalData;
 
 type ToastHandler = Box<dyn Fn(String, Option<Rc<dyn Fn()>>)>;
+
+/// Makes the widget for signing in. Its argument runs when the page has moved
+/// on, which is when `whoami` is worth asking (SPEC §4.4).
+pub type SignInView = Rc<dyn Fn(Box<dyn Fn()>) -> gtk::Widget>;
 
 /// What every store needs: the backend, settings, the session, and a way to
 /// show an error toast. Created once by the application.
@@ -20,18 +25,35 @@ pub struct Context {
     pub session: SessionStore,
     /// True when running on `MockBackend`.
     pub mock: bool,
+    /// The sign-in page; the real one is Reddit's, in a web view.
+    pub sign_in_view: Option<SignInView>,
+    /// `agora.db`, when it could be opened.
+    pub local: Option<LocalData>,
     toast: RefCell<Option<ToastHandler>>,
 }
 
 impl Context {
     /// Creates the context.
     pub fn new(backend: Rc<dyn Backend>, settings: gio::Settings, mock: bool) -> Rc<Self> {
+        Self::with_services(backend, settings, mock, None, None)
+    }
+
+    /// Creates the context with the sign-in page and the local database.
+    pub fn with_services(
+        backend: Rc<dyn Backend>,
+        settings: gio::Settings,
+        mock: bool,
+        sign_in_view: Option<SignInView>,
+        local: Option<LocalData>,
+    ) -> Rc<Self> {
         let session = SessionStore::new(backend.clone());
         Rc::new(Self {
             backend,
             settings,
             session,
             mock,
+            sign_in_view,
+            local,
             toast: RefCell::default(),
         })
     }

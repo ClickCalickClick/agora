@@ -7,6 +7,8 @@ crates/agora-app/src/config.rs
 crates/agora-app/src/i18n.rs
 crates/agora-app/src/main.rs
 crates/agora-app/src/render/mod.rs
+crates/agora-app/src/services/local_data.rs
+crates/agora-app/src/services/mod.rs
 crates/agora-app/src/stores/context.rs
 crates/agora-app/src/stores/feed.rs
 crates/agora-app/src/stores/mod.rs
@@ -23,7 +25,9 @@ crates/agora-app/src/ui/post_header.rs
 crates/agora-app/src/ui/post_page.rs
 crates/agora-app/src/ui/post_row.rs
 crates/agora-app/src/ui/sidebar.rs
+crates/agora-app/src/ui/sign_in.rs
 crates/agora-app/src/ui/subreddit_header.rs
+crates/agora-app/src/ui/welcome.rs
 crates/agora-app/src/ui/window.rs
 crates/agora-app/src/util.rs
 data/resources/ui/feed_page.blp
@@ -31,4 +35,5 @@ data/resources/ui/post_page.blp
 data/resources/ui/post_row.blp
 data/resources/ui/shortcuts_dialog.blp
 data/resources/ui/sidebar.blp
+data/resources/ui/welcome.blp
 data/resources/ui/window.blp

@@ -95,6 +95,19 @@ impl SessionStore {
         });
     }
 
+    /// Signs out: clears the web session (SPEC §4.4). The backend's `SignedOut`
+    /// event moves the state.
+    pub fn sign_out(&self, on_error: impl FnOnce(AgoraError) + 'static) {
+        let Some(backend) = self.imp().backend.borrow().clone() else {
+            return;
+        };
+        glib::spawn_future_local(async move {
+            if let Err(e) = backend.sign_out().await {
+                on_error(e);
+            }
+        });
+    }
+
     /// Whether requests may be sent.
     pub fn can_request(&self) -> bool {
         self.state() == SessionState::SignedIn

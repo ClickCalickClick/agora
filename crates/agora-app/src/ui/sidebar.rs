@@ -18,6 +18,8 @@ mod imp {
     pub struct AgoraSidebar {
         #[template_child]
         pub sidebar: TemplateChild<adw::Sidebar>,
+        #[template_child]
+        pub account_button: TemplateChild<gtk::MenuButton>,
         pub on_feed: OnceCell<FeedHandler>,
         pub subscriptions: RefCell<Option<SubscriptionsStore>>,
         /// Fixed rows in order, matching the first sidebar items.
@@ -92,6 +94,22 @@ impl AgoraSidebar {
         });
         imp.sidebar.append(subs);
         imp.subscriptions.replace(Some(subscriptions.clone()));
+    }
+
+    /// Shows the account menu for `username`, or hides it when signed out
+    /// (SPEC §5.2; Profile arrives in slice 4).
+    pub fn set_account(&self, username: &str) {
+        let button = &*self.imp().account_button;
+        button.set_visible(!username.is_empty());
+        if username.is_empty() {
+            button.set_menu_model(None::<&gtk::gio::MenuModel>);
+            return;
+        }
+        let section = gtk::gio::Menu::new();
+        section.append(Some(&gettext("_Sign Out…")), Some("win.sign-out"));
+        let menu = gtk::gio::Menu::new();
+        menu.append_section(Some(&format!("u/{username}")), &section);
+        button.set_menu_model(Some(&menu));
     }
 
     fn feed_at(&self, index: u32) -> Option<Feed> {

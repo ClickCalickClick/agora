@@ -1,0 +1,123 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $AgoraWelcome: Adw.Dialog {
+  title: _("Welcome to Agora");
+  content-width: 480;
+  content-height: 640;
+
+  child: Adw.ToolbarView {
+    [top]
+    Adw.HeaderBar {}
+
+    content: Gtk.Box {
+      orientation: vertical;
+
+      Adw.Carousel carousel {
+        vexpand: true;
+        interactive: false;
+        allow-scroll-wheel: false;
+
+        Adw.StatusPage {
+          hexpand: true;
+          vexpand: true;
+          icon-name: "io.github.ClickCalickClick.Agora";
+          title: _("Welcome to Agora");
+          description: _("A calm way to browse and discuss Reddit on GNOME");
+
+          styles [
+            "compact",
+          ]
+
+          child: Adw.Clamp {
+            maximum-size: 400;
+
+            child: Gtk.Box {
+              orientation: vertical;
+              spacing: 18;
+
+              Gtk.Label {
+                wrap: true;
+                xalign: 0;
+                label: _("Agora is unofficial and is not affiliated with Reddit, Inc. It is for personal use and may stop working at any time. It works through your own Reddit login, automated use may break Reddit's rules, and you use it at your own risk.");
+              }
+
+              Gtk.Button {
+                halign: start;
+                label: _("Read the Full Disclaimer");
+                action-name: "app.about";
+
+                styles [
+                  "link",
+                ]
+              }
+
+              Gtk.CheckButton risk_check {
+                label: _("I understand that using Agora may put my Reddit account at risk");
+              }
+
+              Gtk.Button continue_button {
+                halign: center;
+                sensitive: bind risk_check.active;
+                label: _("_Continue");
+                use-underline: true;
+                clicked => $on_continue() swapped;
+
+                styles [
+                  "pill",
+                  "suggested-action",
+                ]
+              }
+            };
+          };
+        }
+
+        Adw.StatusPage {
+          hexpand: true;
+          vexpand: true;
+          icon-name: "avatar-default-symbolic";
+          title: _("Sign In to Reddit");
+          description: _("You sign in on Reddit's own page. Agora never sees your password, and there is nothing to register.");
+
+          child: Gtk.Button {
+            halign: center;
+            label: _("_Sign In");
+            use-underline: true;
+            clicked => $on_sign_in() swapped;
+
+            styles [
+              "pill",
+              "suggested-action",
+            ]
+          };
+        }
+
+        Adw.StatusPage {
+          hexpand: true;
+          vexpand: true;
+          icon-name: "emblem-ok-symbolic";
+          title: _("You're All Set");
+          description: _("Press Ctrl+? for keyboard shortcuts. Agora opens with your Home feed and goes at a person's pace, so a page can take a moment to load.");
+
+          child: Gtk.Button {
+            halign: center;
+            label: _("_Start Reading");
+            use-underline: true;
+            clicked => $on_done() swapped;
+
+            styles [
+              "pill",
+              "suggested-action",
+            ]
+          };
+        }
+      }
+
+      Adw.CarouselIndicatorDots {
+        carousel: carousel;
+        margin-top: 6;
+        margin-bottom: 12;
+      }
+    };
+  };
+}

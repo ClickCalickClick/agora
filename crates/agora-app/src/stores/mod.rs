@@ -12,7 +12,7 @@ mod test_util;
 mod thread;
 mod writes;
 
-pub use context::Context;
+pub use context::{Context, SignInView};
 pub use feed::FeedStore;
 pub use objects::*;
 pub use session::{SessionState, SessionStore};

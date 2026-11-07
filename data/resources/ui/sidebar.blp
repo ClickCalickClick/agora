@@ -5,6 +5,13 @@ template $AgoraSidebar: Adw.Bin {
   child: Adw.ToolbarView {
     [top]
     Adw.HeaderBar {
+      [start]
+      Gtk.MenuButton account_button {
+        visible: false;
+        icon-name: "avatar-default-symbolic";
+        tooltip-text: _("Account");
+      }
+
       [end]
       Gtk.MenuButton {
         primary: true;

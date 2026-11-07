@@ -52,12 +52,37 @@ impl SubscriptionsStore {
                 SessionState::SignedOut => {
                     obj.list().remove_all();
                     obj.set_state(LoadState::Idle);
+                    if let Some(local) = obj.ctx().local.as_ref()
+                        && let Err(e) = local.clear()
+                    {
+                        tracing::warn!("could not clear the saved subscriptions: {e}");
+                    }
                 }
                 _ => {}
             }
         ));
+        // Last session's list shows until the refresh at sign-in replaces it.
+        if let Some(local) = ctx.local.as_ref() {
+            match local.subscriptions() {
+                Ok(saved) => obj.show(saved, &favorites(&ctx)),
+                Err(e) => tracing::warn!("could not read the saved subscriptions: {e}"),
+            }
+        }
         obj.imp().ctx.replace(Some(ctx));
         obj
+    }
+
+    fn ctx(&self) -> Rc<Context> {
+        self.imp().ctx.borrow().clone().unwrap()
+    }
+
+    fn show(&self, mut subs: Vec<agora_core::Subreddit>, favorites: &[String]) {
+        subs.sort_by_key(|s| {
+            let name = s.name.as_str().to_lowercase();
+            (!favorites.contains(&name), name)
+        });
+        let items: Vec<SubredditObject> = subs.into_iter().map(SubredditObject::new).collect();
+        self.list().splice(0, self.list().n_items(), &items);
     }
 
     /// Subscriptions, as [`SubredditObject`]s.
@@ -76,24 +101,19 @@ impl SubscriptionsStore {
         }
         self.set_state(LoadState::Loading);
         let backend = ctx.backend.clone();
-        let favorites: Vec<String> = ctx
-            .settings
-            .strv("favorite-subreddits")
-            .iter()
-            .map(|s| s.to_lowercase())
-            .collect();
+        let favorites = favorites(&ctx);
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
             let result = backend.subscriptions().await;
             let Some(obj) = weak.upgrade() else { return };
             match result {
-                Ok(mut subs) => {
-                    subs.sort_by_key(|s| {
-                        let name = s.name.as_str().to_lowercase();
-                        (!favorites.contains(&name), name)
-                    });
-                    let items: Vec<SubredditObject> = subs.into_iter().map(SubredditObject::new).collect();
-                    obj.list().splice(0, obj.list().n_items(), &items);
+                Ok(subs) => {
+                    if let Some(local) = obj.ctx().local.as_ref()
+                        && let Err(e) = local.save_subscriptions(&subs)
+                    {
+                        tracing::warn!("could not save the subscriptions: {e}");
+                    }
+                    obj.show(subs, &favorites);
                     obj.set_state(LoadState::Done);
                 }
                 Err(e) => {
@@ -118,6 +138,14 @@ impl SubscriptionsStore {
             self.notify_state();
         }
     }
+}
+
+fn favorites(ctx: &Context) -> Vec<String> {
+    ctx.settings
+        .strv("favorite-subreddits")
+        .iter()
+        .map(|s| s.to_lowercase())
+        .collect()
 }
 
 #[cfg(test)]

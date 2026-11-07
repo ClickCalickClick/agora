@@ -17,6 +17,7 @@ repository = "https://github.com/ClickCalickClick/agora"
 [workspace.dependencies]
 agora-core = { path = "crates/agora-core" }
 agora-markdown = { path = "crates/agora-markdown" }
+agora-reddit-web = { path = "crates/agora-reddit-web" }
 async-channel = "2"
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
