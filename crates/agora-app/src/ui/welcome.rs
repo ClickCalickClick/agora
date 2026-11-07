@@ -75,7 +75,7 @@ impl AgoraWelcome {
     /// Creates the dialog; `on_sign_in` opens the sign-in dialog.
     pub fn new(ctx: Rc<Context>, on_sign_in: impl Fn() + 'static) -> Self {
         let obj: Self = glib::Object::new();
-        ctx.session.connect_state_notify(glib::clone!(
+        let handler = ctx.session.connect_state_notify(glib::clone!(
             #[weak]
             obj,
             move |session| {
@@ -84,6 +84,13 @@ impl AgoraWelcome {
                 }
             }
         ));
+        let session = ctx.session.clone();
+        let handler = std::cell::Cell::new(Some(handler));
+        obj.connect_closed(move |_| {
+            if let Some(handler) = handler.take() {
+                session.disconnect(handler);
+            }
+        });
         let imp = obj.imp();
         let _ = imp.ctx.set(ctx);
         let _ = imp.on_sign_in.set(Box::new(on_sign_in));

@@ -17,7 +17,20 @@
     return count;
   }
 
+  // URLs from Reddit's HTML come through here, and POSTs carry the CSRF token,
+  // so nothing leaves this origin.
+  function sameOrigin(url) {
+    try {
+      return new URL(url, location.origin).origin === location.origin;
+    } catch {
+      return false;
+    }
+  }
+
   async function request(id, url, init, keepBody = true) {
+    if (!sameOrigin(url)) {
+      return { status: 0, finalUrl: '', error: 'refused a URL on another site' };
+    }
     let response;
     try {
       response = await fetch(url, Object.assign({ credentials: 'include', redirect: 'follow' }, init));

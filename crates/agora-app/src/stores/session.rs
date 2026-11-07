@@ -35,6 +35,10 @@ mod imp {
         pub backend: RefCell<Option<Rc<dyn Backend>>>,
         /// Bumped by every block, so only the newest back-off timer acts.
         pub block_generation: Cell<u64>,
+        /// A `whoami` is running; only one runs at a time.
+        pub checking: Cell<bool>,
+        /// `check()` was called during it, so the answer may be out of date.
+        pub check_again: Cell<bool>,
         /// Empty while signed out.
         #[property(get)]
         pub username: RefCell<String>,
@@ -75,13 +79,21 @@ impl SessionStore {
 
     /// Asks the backend who is signed in.
     pub fn check(&self) {
-        let Some(backend) = self.imp().backend.borrow().clone() else {
+        let imp = self.imp();
+        if imp.checking.replace(true) {
+            imp.check_again.set(true);
+            return;
+        }
+        let Some(backend) = imp.backend.borrow().clone() else {
+            imp.checking.set(false);
             return;
         };
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
             let result = backend.whoami().await;
             let Some(obj) = weak.upgrade() else { return };
+            obj.imp().checking.set(false);
+            let again = obj.imp().check_again.replace(false);
             match result {
                 Ok(Some(name)) => obj.set(SessionState::SignedIn, name.as_str()),
                 Ok(None) => obj.set(SessionState::SignedOut, ""),
@@ -91,6 +103,9 @@ impl SessionStore {
                     tracing::warn!("whoami failed: {e}");
                     obj.set(SessionState::CheckFailed, "");
                 }
+            }
+            if again && matches!(obj.state(), SessionState::SignedOut | SessionState::Expired) {
+                obj.check();
             }
         });
     }

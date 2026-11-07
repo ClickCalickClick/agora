@@ -47,7 +47,7 @@ impl AgoraSignIn {
         toolbar.add_top_bar(&adw::HeaderBar::new());
         toolbar.set_content(Some(&page));
         obj.set_child(Some(&toolbar));
-        session.connect_state_notify(glib::clone!(
+        let handler = session.connect_state_notify(glib::clone!(
             #[weak]
             obj,
             move |session| {
@@ -56,6 +56,12 @@ impl AgoraSignIn {
                 }
             }
         ));
+        let handler = std::cell::Cell::new(Some(handler));
+        obj.connect_closed(move |_| {
+            if let Some(handler) = handler.take() {
+                session.disconnect(handler);
+            }
+        });
         obj
     }
 }

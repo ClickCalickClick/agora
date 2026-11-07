@@ -69,14 +69,18 @@ fn respond(path: &str) -> (u16, Vec<(&'static str, String)>, String) {
         "/svc/shreddit/community-more-posts/hot/" if path.contains("name=gone") => {
             (302, vec![("Location", "/login/?dest=x".to_string())], String::new())
         }
-        "/login/" => (200, Vec::new(), "<html>log in</html>".into()),
+        "/login" | "/login/" => (200, Vec::new(), "<html>log in</html>".into()),
         "/svc/shreddit/community-more-posts/hot/" if path.contains("name=blockme") => {
             (403, Vec::new(), fixture("blocked_network_security.html"))
         }
         "/svc/shreddit/community-more-posts/hot/" if path.contains("name=slow") => (429, Vec::new(), String::new()),
         "/svc/shreddit/community-more-posts/hot/" => html("listing_subreddit.html"),
         "/r/gnome/comments/1xkeknc/" => html("listing_subreddit.html"),
-        "/r/gnome/comments/other/" => html("listing_subreddit.html"),
+        "/r/gnome/comments/other/" => (
+            200,
+            Vec::new(),
+            r#"<shreddit-post id="t3_other" post-title="Other" subreddit-name="gnome"></shreddit-post>"#.to_string(),
+        ),
         "/svc/shreddit/comments/r/gnome/1xkeknc" => html("post_comments.html"),
         "/svc/shreddit/comments/r/gnome/other" => html("post_comments.html"),
         "/svc/shreddit/more-comments/r/gnome/t3_1xkeknc" => html("more_comments.html"),
@@ -344,6 +348,21 @@ async fn signed_out(origin: String, log: Log, dir: PathBuf) {
     // whoami may still ask, and clears the state when it finds an account.
     assert!(b.whoami().await.unwrap().is_some());
     assert!(b.listing(listing("gnome")).await.is_ok());
+
+    // Signing in again after an expiry, with the home page not loaded yet.
+    let fresh = backend(&origin, &dir, "expired-again");
+    let _ = fresh.listing(listing("gone")).await;
+    let page_loads = |log: &Log| log.calls().iter().filter(|s| s.path == "/r/popular/").count();
+    let before = page_loads(&log);
+    let view = fresh.login_view(|| {});
+    glib::timeout_future(Duration::from_millis(1500)).await;
+    drop(view);
+    assert!(
+        fresh.whoami().await.unwrap().is_some(),
+        "whoami must get past the home page"
+    );
+    assert!(fresh.listing(listing("gnome")).await.is_ok());
+    assert!(page_loads(&log) <= before + 1, "no extra page loads");
 }
 
 fn main() {

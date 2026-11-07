@@ -22,6 +22,8 @@ mod imp {
         pub after: RefCell<Option<Cursor>>,
         /// Bumped on every reset so late replies for an old feed are dropped.
         pub generation: Cell<u64>,
+        /// A `listing` request is running.
+        pub in_flight: Cell<bool>,
         pub posts: RefCell<Option<gio::ListStore>>,
         /// Title for the list pane header ("Home", "r/gnome").
         #[property(get)]
@@ -143,6 +145,7 @@ impl FeedStore {
         if session.state() == SessionState::SignedOut {
             let imp = self.imp();
             imp.generation.set(imp.generation.get() + 1);
+            imp.in_flight.set(false);
             imp.after.replace(None);
             self.posts().remove_all();
             self.set_state(LoadState::Idle);
@@ -151,7 +154,10 @@ impl FeedStore {
         if !session.can_request() {
             return;
         }
-        if self.posts().n_items() == 0 && matches!(self.state(), LoadState::Idle | LoadState::Error) {
+        if self.posts().n_items() == 0
+            && matches!(self.state(), LoadState::Idle | LoadState::Error | LoadState::Loading)
+            && !self.imp().in_flight.get()
+        {
             self.set_state(LoadState::Idle);
             self.load_more();
         }
@@ -166,6 +172,7 @@ impl FeedStore {
     pub fn refresh(&self) {
         let imp = self.imp();
         imp.generation.set(imp.generation.get() + 1);
+        imp.in_flight.set(false);
         imp.after.replace(None);
         self.posts().remove_all();
         self.set_state(LoadState::Idle);
@@ -181,8 +188,10 @@ impl FeedStore {
         let Some(feed) = self.feed() else { return };
         let ctx = self.ctx();
         if !ctx.session.can_request() {
-            if let Some(reason) = ctx.session.refusal() {
-                self.set_error(&reason);
+            match ctx.session.refusal() {
+                Some(reason) => self.set_error(&reason),
+                // The first check is still running; its result loads the feed.
+                None => self.set_state(LoadState::Loading),
             }
             return;
         }
@@ -194,6 +203,7 @@ impl FeedStore {
         let generation = imp.generation.get();
         tracing::debug!(feed = ?request.feed, after = ?request.after, "listing");
         self.set_state(LoadState::Loading);
+        imp.in_flight.set(true);
         let backend = ctx.backend.clone();
         let weak = self.downgrade();
         glib::spawn_future_local(async move {
@@ -202,6 +212,7 @@ impl FeedStore {
             if obj.imp().generation.get() != generation {
                 return;
             }
+            obj.imp().in_flight.set(false);
             match result {
                 Ok(listing) => {
                     let items: Vec<PostObject> = listing.items.into_iter().map(PostObject::new).collect();

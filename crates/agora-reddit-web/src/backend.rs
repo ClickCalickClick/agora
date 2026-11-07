@@ -106,6 +106,19 @@ impl Drop for Permit {
     }
 }
 
+/// Ends a home page load: a load that did not succeed can be tried again, and
+/// anyone still waiting is told it was cancelled.
+struct HomeLoad(Rc<Inner>);
+
+impl Drop for HomeLoad {
+    fn drop(&mut self) {
+        if self.0.home.get() == Home::Loading {
+            self.0.home.set(Home::NotLoaded);
+        }
+        self.0.home_waiters.borrow_mut().clear();
+    }
+}
+
 /// Which lane and view a request belongs to.
 #[derive(Clone)]
 struct Slot {
@@ -169,11 +182,16 @@ impl Inner {
         }
     }
 
+    fn check_block(&self) -> BackendResult<()> {
+        match self.scheduler.borrow().blocked_for(self.now()) {
+            Some(retry_after) => Err(AgoraError::Blocked { retry_after }),
+            None => Ok(()),
+        }
+    }
+
     /// Why nothing may be sent at the moment.
     fn refuse(&self, operation: &str) -> BackendResult<()> {
-        if let Some(retry_after) = self.scheduler.borrow().blocked_for(self.now()) {
-            return Err(AgoraError::Blocked { retry_after });
-        }
+        self.check_block()?;
         if self.expired.get() && operation != "whoami" {
             return Err(AgoraError::SessionExpired);
         }
@@ -212,9 +230,13 @@ impl Inner {
         AgoraError::Blocked { retry_after }
     }
 
+    /// Requests stop, and what was queued is never sent (SPEC §4.4).
     fn logged_out(&self) -> AgoraError {
         if !self.expired.replace(true) {
             let _ = self.events.0.try_send(BackendEvent::SessionExpired);
+        }
+        for waiter in self.scheduler.borrow_mut().drain() {
+            let _ = waiter.send(Err(AgoraError::SessionExpired));
         }
         AgoraError::SessionExpired
     }
@@ -259,6 +281,18 @@ impl Inner {
         }
     }
 
+    /// A failure only costs the quiet page, so it is logged and not fatal.
+    async fn add_quiet_filter(&self, manager: &UserContentManager) {
+        let store = UserContentFilterStore::new(&self.config.cache_dir.join("filters").to_string_lossy());
+        match store
+            .save_future("agora-quiet", &glib::Bytes::from_owned(quiet::rules().into_bytes()))
+            .await
+        {
+            Ok(filter) => manager.add_filter(&filter),
+            Err(e) => tracing::warn!("could not compile the quiet-page filter: {e}"),
+        }
+    }
+
     fn on_home_page(&self) -> bool {
         self.home.get() == Home::Loaded
             && self
@@ -279,42 +313,40 @@ impl Inner {
             return receiver.await.unwrap_or(Err(AgoraError::Cancelled));
         }
         this.home.set(Home::Loading);
+        // However this ends, nobody stays stuck behind `Loading`.
+        let guard = HomeLoad(this.clone());
         let slot = Slot {
             lane,
             view: View::None,
             step: false,
         };
         let result = Self::load_home(this, &slot).await;
-        this.home
-            .set(if result.is_ok() { Home::Loaded } else { Home::NotLoaded });
+        if result.is_ok() {
+            this.home.set(Home::Loaded);
+        }
         for waiter in this.home_waiters.take() {
             let _ = waiter.send(result.clone());
         }
+        drop(guard);
         result
     }
 
     async fn load_home(this: &Rc<Self>, slot: &Slot) -> BackendResult<()> {
         if !this.filter_added.replace(true) {
-            let store = UserContentFilterStore::new(&this.config.cache_dir.join("filters").to_string_lossy());
-            match store
-                .save_future("agora-quiet", &glib::Bytes::from_owned(quiet::rules().into_bytes()))
-                .await
-            {
-                Ok(filter) => this.manager.add_filter(&filter),
-                Err(e) => tracing::warn!("could not compile the quiet-page filter: {e}"),
-            }
+            this.add_quiet_filter(&this.manager).await;
         }
         let permit = Self::acquire(this, slot).await?;
-        this.refuse("home")?;
+        // The session may be expired: signing in again needs this page too.
+        this.check_block()?;
         let url = format!("{}{}", this.config.origin, this.config.home_path);
         tracing::debug!(%url, "loading the home page");
         let status = load_page(&this.view, &url).await;
         drop(permit);
         let status = status?;
         match status {
-            429 => Err(this.pushback()),
-            403 => Err(this.pushback()),
-            s if s >= 500 => Err(AgoraError::Network(format!("HTTP {s}"))),
+            429 | 403 => Err(this.pushback()),
+            0 => Err(AgoraError::Network("the home page gave no response".into())),
+            s if s >= 400 => Err(AgoraError::Network(format!("HTTP {s}"))),
             _ => Ok(()),
         }
     }
@@ -332,6 +364,10 @@ impl Inner {
         let name = parse::user::whoami(&reply.final_url);
         if name.is_some() {
             this.expired.set(false);
+            // Signed out, the home page may have ended up on the login page.
+            if this.view.uri().is_some_and(|uri| is_login_url(&uri)) {
+                this.home.set(Home::NotLoaded);
+            }
         }
         Ok(name)
     }
@@ -356,6 +392,13 @@ impl Inner {
             "range": range,
             "after": request.after.as_ref().map(Cursor::as_str),
         });
+        if request
+            .after
+            .as_ref()
+            .is_some_and(|c| !c.as_str().starts_with("/svc/shreddit/"))
+        {
+            return Err(broken("listing"));
+        }
         let slot = Slot {
             lane,
             view,
@@ -380,7 +423,7 @@ impl Inner {
             json!({"subreddit": request.subreddit.as_str(), "post": bare}),
         )
         .await?;
-        let post = parse::post_page(&page.body)?;
+        let post = parse::post_page(&page.body, &request.post)?;
         let focus = request.focus.as_ref().map(|c| c.as_str().trim_start_matches("t1_"));
         let tree = Self::call(
             this,
@@ -394,6 +437,9 @@ impl Inner {
             }),
         )
         .await?;
+        if !tree.body.trim().is_empty() && !tree.body.contains("<shreddit-") {
+            return Err(broken("post_with_comments"));
+        }
         Ok((post, parse::comments::parse(&tree.body, &request.post)))
     }
 
@@ -415,6 +461,9 @@ impl Inner {
         };
         let args = json!({"src": more.src, "cursor": more.cursor});
         let reply = Self::call(this, slot, "more_comments", args).await?;
+        if !reply.body.trim().is_empty() && !reply.body.contains("<shreddit-") {
+            return Err(broken("more_comments"));
+        }
         Ok(parse::comments::parse(&reply.body, &post))
     }
 
@@ -599,22 +648,50 @@ impl RedditWebBackend {
     }
 
     /// A visible view on Reddit's own login page, on the same session (SPEC
-    /// §4.4). `on_navigated` runs when the page leaves the login path, which is
-    /// when asking `whoami` makes sense.
+    /// §4.4), with the same quiet-page filter as the hidden view. `on_navigated`
+    /// runs when the page leaves the login path, and again on later real page
+    /// loads in case that was not the end of signing in. Reddit's scripts changing
+    /// the address do not run it, so they cannot cause Agora traffic.
     pub fn login_view(&self, on_navigated: impl Fn() + 'static) -> gtk::Widget {
-        let view = WebView::builder().network_session(&self.inner.session).build();
+        let manager = UserContentManager::new();
+        let view = WebView::builder()
+            .network_session(&self.inner.session)
+            .user_content_manager(&manager)
+            .build();
         let inner = self.inner.clone();
         let on_navigated = Rc::new(on_navigated);
-        let last = RefCell::new(String::new());
+        let left_login = Rc::new(Cell::new(false));
+        let last = Rc::new(RefCell::new(String::new()));
+        let leave = {
+            let (left_login, last, on_navigated) = (left_login.clone(), last.clone(), on_navigated.clone());
+            move |uri: &str| {
+                if !left_login.replace(true) {
+                    last.replace(uri.to_string());
+                    // The hidden page was loaded signed out.
+                    if inner.home.get() == Home::Loaded {
+                        inner.home.set(Home::NotLoaded);
+                    }
+                    on_navigated();
+                }
+            }
+        };
         view.connect_uri_notify(move |view| {
             let Some(uri) = view.uri() else { return };
-            if is_login_url(&uri) || *last.borrow() == uri.as_str() {
+            if is_login_url(&uri) {
+                left_login.set(false);
+            } else {
+                leave(&uri);
+            }
+        });
+        view.connect_load_changed(move |view, event| {
+            if event != LoadEvent::Finished {
                 return;
             }
-            last.replace(uri.to_string());
-            // The hidden page was loaded signed out; it reloads before the next call.
-            inner.home.set(Home::NotLoaded);
-            on_navigated();
+            let Some(uri) = view.uri() else { return };
+            if !is_login_url(&uri) && *last.borrow() != uri.as_str() {
+                last.replace(uri.to_string());
+                on_navigated();
+            }
         });
         view.connect_create(|view, _| {
             // Single sign-on opens a pop-up that talks back to its opener.
@@ -640,8 +717,14 @@ impl RedditWebBackend {
             ));
             Some(popup.upcast())
         });
-        view.load_uri(&format!("{}/login", self.inner.config.origin));
-        view.upcast()
+        let url = format!("{}/login", self.inner.config.origin);
+        let widget = view.clone().upcast();
+        let inner = self.inner.clone();
+        glib::spawn_future_local(async move {
+            inner.add_quiet_filter(&manager).await;
+            view.load_uri(&url);
+        });
+        widget
     }
 
     /// Runs every read operation once in the background lane (SPEC §4.5), and

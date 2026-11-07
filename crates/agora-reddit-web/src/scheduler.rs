@@ -100,16 +100,18 @@ impl<T> Scheduler<T> {
             match &view {
                 View::None => {}
                 View::Feed(id) => {
+                    // Only a different feed closes the post: another page of
+                    // the same feed sits next to it.
                     if self.feed.as_ref() != Some(id) {
                         self.burst_pending = true;
+                        self.feed = Some(id.clone());
+                        self.thread = None;
+                        dropped = self.remove_interactive(|v| match v {
+                            View::None => false,
+                            View::Feed(other) => other != id,
+                            View::Thread(_) => true,
+                        });
                     }
-                    self.feed = Some(id.clone());
-                    self.thread = None;
-                    dropped = self.remove_interactive(|v| match v {
-                        View::None => false,
-                        View::Feed(other) => other != id,
-                        View::Thread(_) => true,
-                    });
                 }
                 View::Thread(id) => {
                     if self.thread.as_ref() != Some(id) {
@@ -394,6 +396,15 @@ mod tests {
         s.enqueue(Lane::Interactive, thread("b"), "b1");
         assert_eq!(s.enqueue_step(Lane::Interactive, thread("a"), "a2"), Err("a2"));
         assert_eq!(s.enqueue_step(Lane::Interactive, thread("b"), "b2"), Ok(()));
+    }
+
+    #[test]
+    fn another_page_of_the_same_feed_keeps_the_open_post() {
+        let mut s = scheduler();
+        s.enqueue(Lane::Interactive, feed("gnome"), "page1");
+        s.enqueue(Lane::Interactive, thread("a"), "post");
+        assert!(s.enqueue(Lane::Interactive, feed("gnome"), "page2").is_empty());
+        assert_eq!(s.enqueue_step(Lane::Interactive, thread("a"), "comments"), Ok(()));
     }
 
     #[test]

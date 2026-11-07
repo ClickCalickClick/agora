@@ -38,10 +38,11 @@ pub(crate) fn text_of(el: &ElementRef<'_>) -> String {
     el.text().flat_map(str::split_whitespace).collect::<Vec<_>>().join(" ")
 }
 
-/// The post from a post page.
-pub fn post_page(html: &str) -> Result<agora_core::Post, AgoraError> {
+/// The post asked for from a post page, which can hold others (recommendations).
+pub fn post_page(html: &str, id: &agora_core::PostId) -> Result<agora_core::Post, AgoraError> {
     let doc = scraper::Html::parse_document(html);
     doc.select(&sel("shreddit-post"))
+        .filter(|el| attr(el, "id") == Some(id.as_str()))
         .find_map(|el| listing::post_from(&el))
         .ok_or(broken("post_with_comments"))
 }
@@ -119,6 +120,15 @@ pub(crate) mod tests {
         assert_eq!(parse_timestamp("2026-10-31T17:27:17+0100"), Some(1_793_464_037));
         assert_eq!(parse_timestamp("2026-10-31T12:27:17-04:00"), Some(1_793_464_037));
         assert_eq!(parse_timestamp("yesterday"), None);
+    }
+
+    #[test]
+    fn post_page_finds_the_post_asked_for() {
+        let html = r#"<shreddit-post id="t3_other" post-title="Other" subreddit-name="s"></shreddit-post>
+            <shreddit-post id="t3_a" post-title="This" subreddit-name="s"></shreddit-post>"#;
+        let post = post_page(html, &agora_core::PostId::new("t3_a")).unwrap();
+        assert_eq!(post.title, "This");
+        assert!(post_page(html, &agora_core::PostId::new("t3_b")).is_err());
     }
 
     #[test]
